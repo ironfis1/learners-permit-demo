@@ -477,32 +477,21 @@ async function getRecommendation(id){
   const area = document.getElementById("rec-area");
   area.innerHTML = `<div class="thinking">Reasoning through the decision <div class="dot-pulse"><span></span><span></span><span></span></div></div>`;
 
-  const prompt = `You are an operations decision-support agent for a 14-location pest control company, operating inside "The Learner's Permit" framework: a staged-autonomy system where every recommendation must show its reasoning before it can be trusted.
-
-Category: ${CATEGORIES[s.category].label}
-Location: ${s.location}
-Scenario: ${s.context}
-Available options: ${s.options}
-
-Respond with ONLY valid JSON, no markdown formatting, no code fences, no preamble:
-{"recommendation": "<the specific action you recommend, in plain operational language, one sentence>", "reasoning": "<2-3 sentences of plain, concrete operational reasoning for why, in the voice of someone who actually runs field operations, not generic risk-speak>", "confidence": <integer 0-100>}`;
-
+  // Day 2: the prompt is built server-side from the server's own trusted copy of
+  // SCENARIOS. The client sends nothing but the scenario id - no category, no
+  // context, no free text - so there's nothing here for a scripted request to
+  // inject into the prompt even if it skips the UI entirely.
   try{
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const response = await fetch("/api/recommendation", {
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({
-        model:"claude-sonnet-4-6",
-        max_tokens:1000,
-        messages:[{role:"user", content: prompt}]
-      })
+      body: JSON.stringify({ id })
     });
-    const data = await response.json();
-    const textBlock = (data.content || []).find(b=>b.type==="text");
-    if(!textBlock) throw new Error("No response text");
-    let clean = textBlock.text.replace(/```json|```/g,"").trim();
-    const parsed = JSON.parse(clean);
-    state[id].recommendation = parsed;
+    const data = await response.json().catch(()=>({}));
+    if(!response.ok){
+      throw new Error(data.error || `Request failed (${response.status})`);
+    }
+    state[id].recommendation = data;
     renderDetail();
     renderQueue();
   } catch(err){
