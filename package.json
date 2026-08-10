@@ -1,0 +1,17 @@
+{
+  "name": "learners-permit-demo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The Learner's Permit - Live Decision Console, wrapped as a deployable app (Upsun trial build).",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20 <21"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
