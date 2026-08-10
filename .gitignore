@@ -6,3 +6,4 @@ test-day1.sh
 test-port.sh
 verify-day2.sh
 verify-day2b.sh
+.upsun/local/
