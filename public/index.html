@@ -500,14 +500,33 @@ async function getRecommendation(id){
   }
 }
 
-function review(id, wasCorrect){
+async function review(id, wasCorrect){
   const s = SCENARIOS.find(x=>x.id===id);
   state[id].status = wasCorrect ? "correct" : "incorrect";
-  auditLog.unshift({...s, recommendation: state[id].recommendation, outcome: state[id].status, stageAtTime: stageFor(s.category)});
+  const stageAtTime = stageFor(s.category);
+  auditLog.unshift({...s, recommendation: state[id].recommendation, outcome: state[id].status, stageAtTime});
   renderPermits();
   renderQueue();
   renderDetail();
   renderAudit();
+
+  // Day 3: write-through persistence. The UI already updated optimistically
+  // above; if this fails we log it but don't roll back the UI - the reviewer
+  // already got their answer, and a lost write here is a data problem, not
+  // a UX problem, so it doesn't block the flow.
+  try{
+    const res = await fetch("/api/review", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ id, outcome: state[id].status, recommendation: state[id].recommendation, stageAtTime })
+    });
+    if(!res.ok){
+      const data = await res.json().catch(()=>({}));
+      console.error("Failed to persist review:", data.error || res.status);
+    }
+  } catch(err){
+    console.error("Failed to persist review:", err.message || err);
+  }
 }
 
 function renderAudit(){
@@ -542,10 +561,31 @@ function toggleAudit(i){
   el.style.display = el.style.display==="none" ? "block" : "none";
 }
 
-renderPermits();
-renderQueue();
-renderDetail();
-renderAudit();
+// Day 3: hydrate from the server's persisted audit history before the first
+// render, so a page reload shows real history instead of starting empty.
+async function hydrateFromServer(){
+  try{
+    const res = await fetch("/api/state");
+    if(!res.ok) throw new Error("state fetch failed: " + res.status);
+    const data = await res.json();
+    const rows = (data.reviewed || []).slice().reverse(); // server sends newest-first; unshift in oldest-first order to rebuild the same newest-first auditLog
+    rows.forEach(row=>{
+      const s = SCENARIOS.find(x=>x.id===row.scenarioId);
+      if(!s) return;
+      state[row.scenarioId] = { status: row.outcome, recommendation: row.recommendation };
+      auditLog.unshift({...s, recommendation: row.recommendation, outcome: row.outcome, stageAtTime: row.stageAtTime});
+    });
+  } catch(err){
+    console.error("Failed to hydrate from server, starting empty:", err.message || err);
+  }
+}
+
+hydrateFromServer().finally(()=>{
+  renderPermits();
+  renderQueue();
+  renderDetail();
+  renderAudit();
+});
 </script>
 </body>
 </html>

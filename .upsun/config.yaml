@@ -1,0 +1,27 @@
+applications:
+  learners-permit:
+    source:
+      root: "/"
+
+    type: "nodejs:20"
+
+    relationships:
+      postgresql:
+
+    web:
+      commands:
+        start: "npm start"
+
+    variables:
+      env:
+        NODE_ENV: production
+
+services:
+  postgresql:
+    type: "postgresql:16"
+    disk: 256
+
+routes:
+  "https://{default}/":
+    type: upstream
+    upstream: "learners-permit:http"

@@ -9,12 +9,14 @@
   },
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "dev": "node --watch src/server.js",
+    "seed": "node src/db/seed.js"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",
     "dotenv": "^16.6.1",
     "express": "^4.19.2",
-    "express-rate-limit": "^8.6.2"
+    "express-rate-limit": "^8.6.2",
+    "pg": "^8.13.1"
   }
 }

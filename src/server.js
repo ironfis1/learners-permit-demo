@@ -6,6 +6,8 @@ const path = require("path");
 
 const { issueSessionOnGet } = require("./middleware/session");
 const recommendationRoute = require("./routes/recommendation");
+const persistenceRoute = require("./routes/persistence");
+const { initDb } = require("./db/init");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -15,14 +17,33 @@ app.use(cookieParser(SESSION_SECRET));
 app.use(issueSessionOnGet); // silently issues a session cookie on GET requests only
 
 app.use("/api", recommendationRoute);
+app.use("/api", persistenceRoute);
 
 app.use(express.static(path.join(__dirname, "..", "public")));
 
-app.listen(PORT, () => {
-  console.log(`Learner's Permit demo listening on port ${PORT}`);
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.warn(
-      "ANTHROPIC_API_KEY is not set - /api/recommendation will return 502 until it is."
+async function start() {
+  try {
+    await initDb();
+  } catch (err) {
+    console.error(
+      "Database init failed - /api/state, /api/review, and /api/admin/reset will return 502 until this is fixed:",
+      err.message
     );
   }
-});
+
+  app.listen(PORT, () => {
+    console.log(`Learner's Permit demo listening on port ${PORT}`);
+    if (!process.env.ANTHROPIC_API_KEY) {
+      console.warn(
+        "ANTHROPIC_API_KEY is not set - /api/recommendation will return 502 until it is."
+      );
+    }
+    if (!process.env.DATABASE_URL) {
+      console.warn(
+        "No DATABASE_URL set - persistence endpoints will return 502 until it is."
+      );
+    }
+  });
+}
+
+start();

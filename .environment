@@ -1,0 +1,12 @@
+# Auto-sourced by Upsun into the runtime environment on deploy. Assembles
+# DATABASE_URL from the discrete POSTGRESQL_* vars that the "postgresql"
+# relationship in .upsun/config.yaml exposes. See Day3-Persistence-Deploy.md
+# and https://docs.upsun.com/add-services/postgresql.html#usage-example.
+export DB_CONNECTION="${POSTGRESQL_SCHEME}"
+export DB_USERNAME="${POSTGRESQL_USERNAME}"
+export DB_PASSWORD="${POSTGRESQL_PASSWORD}"
+export DB_HOST="${POSTGRESQL_HOST}"
+export DB_PORT="${POSTGRESQL_PORT}"
+export DB_DATABASE="${POSTGRESQL_PATH}"
+
+export DATABASE_URL="${DB_CONNECTION}://${DB_USERNAME}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_DATABASE}"
