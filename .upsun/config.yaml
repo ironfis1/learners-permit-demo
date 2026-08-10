@@ -19,7 +19,6 @@ applications:
 services:
   postgresql:
     type: "postgresql:16"
-    disk: 256
 
 routes:
   "https://{default}/":
