@@ -7,6 +7,7 @@ const path = require("path");
 const { issueSessionOnGet } = require("./middleware/session");
 const recommendationRoute = require("./routes/recommendation");
 const persistenceRoute = require("./routes/persistence");
+const mcpRoute = require("./mcp/server");
 const { initDb } = require("./db/init");
 
 const app = express();
@@ -18,6 +19,7 @@ app.use(issueSessionOnGet); // silently issues a session cookie on GET requests 
 
 app.use("/api", recommendationRoute);
 app.use("/api", persistenceRoute);
+app.use("/", mcpRoute); // registers POST/GET/DELETE /mcp
 
 app.use(express.static(path.join(__dirname, "..", "public")));
 

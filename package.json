@@ -13,10 +13,12 @@
     "seed": "node src/db/seed.js"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "cookie-parser": "^1.4.7",
     "dotenv": "^16.6.1",
     "express": "^4.19.2",
     "express-rate-limit": "^8.6.2",
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "zod": "^4.4.3"
   }
 }
