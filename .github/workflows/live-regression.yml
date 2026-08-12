@@ -1,0 +1,49 @@
+name: Live Regression (Day 5)
+
+# Manually triggered - runs the same Playwright suite as ci.yml, but against
+# an already-deployed URL (e.g. the live Upsun production URL) instead of a
+# local server + fresh database. This is what Day 5's U3/U4 require: a
+# regression pass against the actual live deployment, not just localhost.
+#
+# Warning: this exercises the real POST /api/admin/reset and POST /api/review
+# routes against whatever database the target URL is backed by. If pointed at
+# a demo-facing URL, reseed afterward (npm run seed via `upsun ssh`) before
+# sending that link to anyone.
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Live URL to test against (e.g. https://main-bvxea6i-rrshddwezjuei.us-3.platformsh.site)"
+        required: true
+        type: string
+
+jobs:
+  live-regression:
+    runs-on: ubuntu-latest
+    env:
+      LIVE_BASE_URL: ${{ inputs.base_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright specs against ${{ inputs.base_url }}
+        run: npm run test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-live
+          path: playwright-report/
+          retention-days: 14
