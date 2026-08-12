@@ -47,7 +47,11 @@ test.describe("I - Error Handling (mocked)", () => {
     );
     await page.evaluate((id) => selectDecision(id), 2);
     await page.locator("#get-rec-btn").click();
-    await expect(page.locator(".error-msg")).toContainText("Upstream failed.");
+    // Day 5 live-regression run flaked here once against production (passed on
+    // CI's built-in retry) - real network/render latency the local suite never
+    // sees, per the QA-lead review's own prediction. Longer timeout, not a
+    // logic change.
+    await expect(page.locator(".error-msg")).toContainText("Upstream failed.", { timeout: 10000 });
     await expect(page.locator("button.get-rec-btn", { hasText: "Retry" })).toBeVisible();
   });
 
