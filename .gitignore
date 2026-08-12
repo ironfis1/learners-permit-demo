@@ -7,3 +7,6 @@ test-port.sh
 verify-day2.sh
 verify-day2b.sh
 .upsun/local/
+playwright-report/
+test-results/
+blob-report/
