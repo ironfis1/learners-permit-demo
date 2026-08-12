@@ -487,7 +487,15 @@ async function getRecommendation(id){
       headers:{"Content-Type":"application/json"},
       body: JSON.stringify({ id })
     });
-    const data = await response.json().catch(()=>({}));
+    let data;
+    try{
+      data = await response.json();
+    } catch(parseErr){
+      // A response that fails to parse as JSON is always an error, even if
+      // the HTTP status itself was 200 - don't silently proceed with an
+      // empty object and render a broken recommendation block.
+      throw new Error("Server returned an invalid response. Try again.");
+    }
     if(!response.ok){
       throw new Error(data.error || `Request failed (${response.status})`);
     }
