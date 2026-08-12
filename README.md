@@ -48,12 +48,20 @@ To seed realistic demo data on the live environment: `upsun ssh -- "npm run seed
 
 To wipe history for a clean demo run: `curl -X POST https://<live-url>/api/admin/reset` (after loading the page once in a browser first, so a session cookie exists - same session gate as every other mutating route).
 
+## MCP server (Day 4)
+
+`POST /mcp` exposes four read-only tools over the SDK's stateless Streamable HTTP transport (no SSE, no session state - a deliberate choice, not an untested fallback: none of these tools need streaming, and it sidesteps any risk of a routing layer buffering/timing out a long-lived connection): `list_pending_decisions`, `get_decision`, `get_permit_status`, `get_audit_trail`. Same `perIpLimiter` rate-limit posture as the HTTP API. Verified live via a Claude Desktop custom connector pointed at the deployed `/mcp` URL.
+
+## Tests / CI (Day 4)
+
+`npm run test:e2e` runs the Playwright suite (`tests/logic.spec.js`, `ui.spec.js`, `api-mocked.spec.js`) against a real local instance of the app - requires `DATABASE_URL` pointed at a Postgres instance (no `ANTHROPIC_API_KEY` needed, since these specs never call the real Anthropic route). `.github/workflows/ci.yml` runs the same suite on every push/PR against a disposable `postgres:16` service container. Full test catalog, including groups not yet wired into the CI gate (persistence/hydration, session-gate/rate-limit, MCP tools, preview-environment cloning): `Learners_Permit_Demo_TestPlan_v3.md`.
+
 ## Status
 
 This is a work-in-progress, multi-day build. Full spec: `Upsun_Trial_LearnersPermit_Plan_v3.md` and the per-day spec files (`Day1-Wrap-App.md` through `Day5-Polish-CostCheck-Outreach.md`) in the Drive LearnersPermit folder.
 
 - **Day 1:** wrapped in Express, folder scaffolding for later days, local run parity with the original artifact.
 - **Day 2:** `/api/recommendation` route holds the Anthropic key server-side and builds the prompt from the server's own trusted scenario data (client sends only a scenario id). Silent session-cookie gate plus per-session/per-IP rate limiting protect the route without adding any friction for a real visitor - see `Day2-Server-Side-API-Controls.md` for the full reasoning. Spend cap on the Anthropic key itself is a manual step, tracked above, not yet done.
-- **Day 3 (this commit):** real persistence via a small Upsun-managed PostgreSQL service (`decisions_log` table). `GET /api/state` hydrates the frontend on load; `POST /api/review` writes through on every review; `POST /api/admin/reset` is an unlinked operational control for demo repeatability. `npm run seed` populates realistic demo data on demand. Deployed to Upsun - see above. Note: the existing 39-case test plan's J1 case ("reload = clean slate") and Section 3's reset language are now stale and need updating for Day 4, since reload now shows real persisted history and reset is the new explicit action.
-- **Day 4:** MCP server, preview-environment data-cloning demo, CI gate (also owns the test-plan update noted above).
+- **Day 3:** real persistence via a small Upsun-managed PostgreSQL service (`decisions_log` table). `GET /api/state` hydrates the frontend on load; `POST /api/review` writes through on every review; `POST /api/admin/reset` is an unlinked operational control for demo repeatability. `npm run seed` populates realistic demo data on demand. Deployed to Upsun.
+- **Day 4 (this commit):** preview-environment data-cloning demo (branch push → Upsun clones production's Postgres data automatically, confirmed via matching `/api/state` output including timestamps; isolation confirmed via a visible code-only change present on the preview URL and absent from production). MCP server exposing 4 read-only tools (see above). Test plan reconciled to v3 and a real CI gate wired up via GitHub Actions - see above. The gate caught a real bug on its first run (malformed-JSON handling in `getRecommendation()`), fixed and reverified.
 - **Day 5:** stability/cost check, final regression pass, proactive outreach handoff.
