@@ -71,6 +71,10 @@
     background:linear-gradient(155deg, var(--paper) 0%, #E9E1CB 60%, #E2D8BC 100%);
     box-shadow:0 8px 22px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,255,255,0.4);
   }
+  .permit-card.revoked{
+    border-style:solid;border-color:var(--rust);
+    box-shadow:0 8px 22px rgba(193,80,46,0.35), inset 0 0 0 1px rgba(193,80,46,0.25);
+  }
   .permit-card .row1{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}
   .permit-card .cat{
     font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:18px;
@@ -86,6 +90,14 @@
   .stamp.learner{color:var(--rust);}
   .stamp.supervised{color:#8A6A1E;background:rgba(138,106,30,0.08);}
   .stamp.licensed{color:#1F6B58;background:rgba(31,107,88,0.1);transform:rotate(-2deg);}
+  .stamp.revoked{color:var(--rust);background:rgba(193,80,46,0.14);border-width:2px;}
+
+  .exec-banner{
+    margin-top:10px;padding:9px 10px;border-radius:2px;
+    background:rgba(193,80,46,0.12);border:1px solid rgba(193,80,46,0.45);
+    color:#8C2E14;font-family:'IBM Plex Mono',monospace;font-size:10.5px;
+    letter-spacing:0.03em;line-height:1.55;font-weight:600;
+  }
 
   .permit-card .meter{
     margin-top:12px;height:5px;background:rgba(36,30,18,0.12);border-radius:3px;overflow:hidden;
@@ -196,14 +208,23 @@
   .rec-reasoning{font-size:14.5px;line-height:1.7;color:var(--text);margin-bottom:16px;}
   .rec-reasoning .swy{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--slate);display:block;margin-bottom:6px;}
 
+  .review-axis{margin-bottom:12px;}
+  .review-axis:last-of-type{margin-bottom:6px;}
+  .review-axis .axis-label{
+    display:block;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.06em;
+    text-transform:uppercase;color:var(--text-dim);margin-bottom:6px;
+  }
   .review-btns{display:flex;gap:10px;flex-wrap:wrap;}
   .review-btn{
     font-family:'IBM Plex Mono',monospace;font-size:12.5px;padding:9px 16px;border-radius:3px;
     border:1px solid var(--line-strong);background:transparent;color:var(--text);cursor:pointer;
     transition:all .15s ease;letter-spacing:0.02em;
   }
-  .review-btn.correct:hover{background:rgba(63,167,150,0.15);border-color:var(--teal);color:var(--teal);}
-  .review-btn.incorrect:hover{background:rgba(193,80,46,0.15);border-color:var(--rust);color:var(--rust);}
+  .review-btn.correct:hover, .review-btn.correct.selected{background:rgba(63,167,150,0.15);border-color:var(--teal);color:var(--teal);}
+  .review-btn.incorrect:hover, .review-btn.incorrect.selected{background:rgba(193,80,46,0.15);border-color:var(--rust);color:var(--rust);}
+  .review-btn.exec-confirmed:hover, .review-btn.exec-confirmed.selected{background:rgba(63,167,150,0.15);border-color:var(--teal);color:var(--teal);}
+  .review-btn.exec-failed:hover, .review-btn.exec-failed.selected{background:rgba(193,80,46,0.15);border-color:var(--rust);color:var(--rust);}
+  .review-hint{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-dim);margin-top:2px;}
   .review-result{
     font-family:'IBM Plex Mono',monospace;font-size:12.5px;padding:8px 14px;border-radius:3px;display:inline-block;
   }
@@ -263,7 +284,7 @@
 
       <div class="instructor-note">
         <h3>Instructor Note</h3>
-        <p>Stage rules, set by the instructor, not the agent: Supervised at 3+ decisions reviewed in a category with 70%+ accuracy. Licensed at 4+ decisions with 90%+ accuracy - with only 4 scenarios loaded per category, that means a perfect record. Any category can be revoked to Learner's Permit instantly - see the permit cards.</p>
+        <p>Two-Axis Trust Model, set by the instructor, not the agent. Judgment Accuracy is graded and gradual - it drives stage progression: Supervised at 3+ decisions reviewed in a category with 70%+ accuracy, Licensed at 4+ decisions with 90%+ accuracy (with only 4 scenarios loaded per category, that means a perfect record). Verified Execution is separate and binary - it checks whether a claimed action actually happened. It never averages with accuracy: one Verified Execution failure permanently revokes that category's permit instantly, no matter how high the accuracy score is, with no tolerance and no reinstatement path. See the permit cards.</p>
       </div>
 
       <div class="audit">
@@ -338,10 +359,25 @@ const SCENARIOS = [
    options:"escalate to a manager, or auto-resolve with a callback and refund offer"}
 ];
 
+// Two-Axis Trust Model: `status` (pending/correct/incorrect) is Judgment
+// Accuracy - graded, gradual, tolerant of misses. `verifiedExecution`
+// (null/"confirmed"/"failed") is a completely separate, binary axis: did
+// the claimed/reported action actually happen, checked against real state?
+// The two never get averaged together - a decision can be judgment-correct
+// AND execution-failed at the same time. See isExecutionRevoked()/stageFor()
+// below for how a single "failed" permanently overrides the accuracy-driven
+// stage for that category, and review()/handleJudgment()/handleExecution()
+// for how the two are captured as genuinely separate instructor controls.
 let state = {};
-SCENARIOS.forEach(s => { state[s.id] = { status:"pending", recommendation:null }; });
+SCENARIOS.forEach(s => { state[s.id] = { status:"pending", recommendation:null, verifiedExecution:null }; });
 let activeId = null;
 let auditLog = [];
+// Holds in-progress instructor selections for a decision that has one axis
+// set but not the other yet - e.g. Judgment marked but Verified Execution
+// not yet marked. A review is only submitted (and only then does it affect
+// stageFor()) once both axes are set, so a decision never sits in a
+// half-graded, ambiguous state.
+let pendingReview = {};
 
 function trackRecord(category){
   const items = SCENARIOS.filter(s => s.category===category)
@@ -353,7 +389,28 @@ function trackRecord(category){
   return {total, correct, accuracy};
 }
 
+// Binary, not graded: true the moment any single reviewed decision in this
+// category has verifiedExecution === "failed". No averaging, no threshold,
+// no tolerance - this is the mechanic that was missing before (see the
+// module-level comment above and the instructor note in the page).
+function isExecutionRevoked(category){
+  return SCENARIOS.some(s => s.category===category && state[s.id].verifiedExecution==="failed");
+}
+
+function executionFailureReason(category){
+  const s = SCENARIOS.find(s => s.category===category && state[s.id].verifiedExecution==="failed");
+  return s ? s.title : null;
+}
+
 function stageFor(category){
+  // Verified Execution failure wins outright, before accuracy is even
+  // consulted - this is the "instant, permanent, automatic revoke
+  // regardless of the accuracy score" rule from the Two-Axis Trust Model.
+  if(isExecutionRevoked(category)) return "revoked";
+  // The manual instructor "Revoke to Learner's Permit" button remains as a
+  // separate, client-only demo control (unchanged behavior, still covered
+  // by the existing Group F/G tests) - distinct from, and layered under,
+  // the persisted Verified Execution revoke above.
   if(state["_revoked_"+category]) return "learner";
   const {total, accuracy} = trackRecord(category);
   if(total>=4 && accuracy>=90) return "licensed";
@@ -362,6 +419,7 @@ function stageFor(category){
 }
 
 function stageMeta(stage){
+  if(stage==="revoked") return {label:"Permit Revoked", color:"var(--rust)"};
   if(stage==="licensed") return {label:"Licensed", color:"var(--teal)"};
   if(stage==="supervised") return {label:"Supervised", color:"var(--amber)"};
   return {label:"Learner's Permit", color:"var(--rust)"};
@@ -370,10 +428,21 @@ function stageMeta(stage){
 function renderPermits(){
   const el = document.getElementById("permits");
   el.innerHTML = Object.keys(CATEGORIES).map(cat=>{
+    // trackRecord() and stageFor() both read from the same `state` object
+    // here - the accuracy stats below are never suppressed or zeroed out
+    // just because the category is revoked, so the numbers can't go stale
+    // relative to the stage badge the way the old manual-revoke-only flow
+    // could. A revoked category still shows its true accuracy record, plus
+    // a distinct banner explaining *why* it's revoked when that's the
+    // reason (not a silently stale number).
     const {total, correct, accuracy} = trackRecord(cat);
     const stage = stageFor(cat);
     const meta = stageMeta(stage);
     const barColor = stage==="licensed" ? "var(--teal)" : stage==="supervised" ? "var(--amber)" : "var(--rust)";
+    const revokedReason = stage==="revoked" ? executionFailureReason(cat) : null;
+    const banner = revokedReason
+      ? `<div class="exec-banner">PERMIT REVOKED &mdash; VERIFIED EXECUTION FAILURE<br>Claimed action did not actually happen: &ldquo;${revokedReason}&rdquo;. This overrides the accuracy score below - permanently, with no averaging and no reinstatement path.</div>`
+      : "";
     return `
     <div class="permit-card ${stage}">
       <div class="row1">
@@ -385,8 +454,9 @@ function renderPermits(){
       </div>
       <div class="meter"><div class="meter-fill" style="width:${accuracy}%;background:${barColor};"></div></div>
       <div class="stats"><span>${correct}/${total} correct</span><span>${accuracy}% accuracy</span></div>
-      <div class="rule">Supervised: 3+ reviewed, 70%+ accuracy<br>Licensed: 4+ reviewed, 90%+ accuracy</div>
-      <button class="revoke-btn" ${stage==="learner"?"disabled":""} onclick="revoke('${cat}')">Revoke to Learner's Permit</button>
+      ${banner}
+      <div class="rule">Supervised: 3+ reviewed, 70%+ accuracy<br>Licensed: 4+ reviewed, 90%+ accuracy<br>Verified Execution failure on any decision = instant, permanent revoke, regardless of accuracy.</div>
+      <button class="revoke-btn" ${(stage==="learner"||stage==="revoked")?"disabled":""} onclick="revoke('${cat}')">Revoke to Learner's Permit</button>
     </div>`;
   }).join("");
 }
@@ -458,16 +528,60 @@ function renderRecommendationBlock(s, st){
       <div class="rec-reasoning"><span class="swy">Show Your Work</span>${st.recommendation.reasoning}</div>
   `;
   if(st.status==="pending"){
+    // Two separate instructor controls, deliberately not conflated: Judgment
+    // (graded accuracy) and Verified Execution (binary, checked against
+    // real state). Either can be set first; the review is submitted once
+    // both are set - see handleJudgment/handleExecution/maybeSubmitReview.
+    const pending = pendingReview[s.id] || {};
     html += `
-      <div class="review-btns">
-        <button class="review-btn correct" onclick="review(${s.id}, true)">Mark Correct</button>
-        <button class="review-btn incorrect" onclick="review(${s.id}, false)">Mark Incorrect</button>
-      </div>`;
+      <div class="review-axis">
+        <span class="axis-label">Judgment - was the recommendation the right call?</span>
+        <div class="review-btns">
+          <button class="review-btn correct ${pending.judgment===true?'selected':''}" onclick="handleJudgment(${s.id}, true)">Mark Correct</button>
+          <button class="review-btn incorrect ${pending.judgment===false?'selected':''}" onclick="handleJudgment(${s.id}, false)">Mark Incorrect</button>
+        </div>
+      </div>
+      <div class="review-axis">
+        <span class="axis-label">Verified Execution - did the claimed action actually happen?</span>
+        <div class="review-btns">
+          <button class="review-btn exec-confirmed ${pending.execution===true?'selected':''}" onclick="handleExecution(${s.id}, true)">Verified Execution: Confirmed</button>
+          <button class="review-btn exec-failed ${pending.execution===false?'selected':''}" onclick="handleExecution(${s.id}, false)">Verified Execution: Failed</button>
+        </div>
+      </div>
+      <div class="review-hint">Both must be set to submit the review. They're independent - judgment-correct and execution-failed can both be true on the same decision.</div>`;
   } else {
-    html += `<div class="review-result ${st.status}">Instructor marked this ${st.status}</div>`;
+    const execLabel = st.verifiedExecution==="failed" ? "FAILED (claimed action did not happen - permit revoked)" : "Confirmed";
+    html += `<div class="review-result ${st.status}">Instructor marked this ${st.status} &middot; Verified Execution: ${execLabel}</div>`;
   }
   html += `</div>`;
   return html;
+}
+
+// Sets the Judgment (accuracy) half of a pending review. Does not submit by
+// itself - see maybeSubmitReview().
+function handleJudgment(id, correct){
+  pendingReview[id] = Object.assign({}, pendingReview[id], { judgment: correct });
+  maybeSubmitReview(id);
+}
+
+// Sets the Verified Execution (binary) half of a pending review. Does not
+// submit by itself - see maybeSubmitReview().
+function handleExecution(id, confirmed){
+  pendingReview[id] = Object.assign({}, pendingReview[id], { execution: confirmed });
+  maybeSubmitReview(id);
+}
+
+// Re-renders to show the in-progress selection immediately, then - once
+// both the Judgment and Verified Execution axes have been set - submits the
+// review as a single call carrying both independent fields.
+async function maybeSubmitReview(id){
+  renderDetail();
+  const pending = pendingReview[id];
+  if(!pending || pending.judgment===undefined || pending.execution===undefined) return;
+  const wasCorrect = pending.judgment;
+  const verifiedExecution = pending.execution ? "confirmed" : "failed";
+  delete pendingReview[id];
+  await review(id, wasCorrect, verifiedExecution);
 }
 
 async function getRecommendation(id){
@@ -508,11 +622,22 @@ async function getRecommendation(id){
   }
 }
 
-async function review(id, wasCorrect){
+// Two-Axis Trust Model: `wasCorrect` is Judgment Accuracy, `verifiedExecution`
+// ("confirmed"|"failed") is the separate binary axis. verifiedExecution
+// defaults to "confirmed" when omitted so every existing direct call site
+// (tests, older callers) keeps its prior behavior of never triggering a
+// revoke; only an explicit "failed" opts into the fabrication path.
+async function review(id, wasCorrect, verifiedExecution){
+  verifiedExecution = verifiedExecution==="failed" ? "failed" : "confirmed";
   const s = SCENARIOS.find(x=>x.id===id);
   state[id].status = wasCorrect ? "correct" : "incorrect";
+  state[id].verifiedExecution = verifiedExecution;
+  // Computed after both fields above are set, so if this review is itself
+  // the one reporting a Verified Execution failure, stageAtTime already
+  // reflects "revoked" for this category - not a stage that's about to be
+  // stale the instant this function returns.
   const stageAtTime = stageFor(s.category);
-  auditLog.unshift({...s, recommendation: state[id].recommendation, outcome: state[id].status, stageAtTime});
+  auditLog.unshift({...s, recommendation: state[id].recommendation, outcome: state[id].status, verifiedExecution, stageAtTime});
   renderPermits();
   renderQueue();
   renderDetail();
@@ -526,7 +651,7 @@ async function review(id, wasCorrect){
     const res = await fetch("/api/review", {
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ id, outcome: state[id].status, recommendation: state[id].recommendation, stageAtTime })
+      body: JSON.stringify({ id, outcome: state[id].status, recommendation: state[id].recommendation, stageAtTime, verifiedExecution })
     });
     if(!res.ok){
       const data = await res.json().catch(()=>({}));
@@ -558,7 +683,7 @@ function renderAudit(){
       <div class="audit-detail" id="audit-detail-${i}" style="display:none;">
         <span class="swy">Show Your Work</span>
         ${a.recommendation.reasoning}<br><br>
-        <span class="mono" style="font-size:11px;">Recommendation: ${a.recommendation.recommendation} · Confidence: ${a.recommendation.confidence} · Instructor marked: ${a.outcome}</span>
+        <span class="mono" style="font-size:11px;">Recommendation: ${a.recommendation.recommendation} · Confidence: ${a.recommendation.confidence} · Instructor marked: ${a.outcome} · Verified Execution: ${a.verifiedExecution==="failed" ? "FAILED" : "Confirmed"}</span>
       </div>
     </div>
   `).join("");
@@ -580,8 +705,14 @@ async function hydrateFromServer(){
     rows.forEach(row=>{
       const s = SCENARIOS.find(x=>x.id===row.scenarioId);
       if(!s) return;
-      state[row.scenarioId] = { status: row.outcome, recommendation: row.recommendation };
-      auditLog.unshift({...s, recommendation: row.recommendation, outcome: row.outcome, stageAtTime: row.stageAtTime});
+      // row.verifiedExecution is persisted server-side (src/db/init.js) -
+      // hydrating it here is what makes a Verified Execution failure (and
+      // the resulting permanent revoke) survive a page reload instead of
+      // resetting to a clean slate the way the old client-only revoke flag
+      // did.
+      const verifiedExecution = row.verifiedExecution || "confirmed";
+      state[row.scenarioId] = { status: row.outcome, recommendation: row.recommendation, verifiedExecution };
+      auditLog.unshift({...s, recommendation: row.recommendation, outcome: row.outcome, verifiedExecution, stageAtTime: row.stageAtTime});
     });
   } catch(err){
     console.error("Failed to hydrate from server, starting empty:", err.message || err);

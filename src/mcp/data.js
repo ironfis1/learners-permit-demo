@@ -13,7 +13,7 @@ const VALID_CATEGORIES = new Set(Object.keys(CATEGORIES));
 // takes the latest row per scenario defensively in case of a re-review.
 async function loadReviewedState() {
   const result = await query(
-    `SELECT scenario_id, category, recommendation, outcome, stage_at_time, reviewed_at
+    `SELECT scenario_id, category, recommendation, outcome, stage_at_time, verified_execution, reviewed_at
      FROM decisions_log
      ORDER BY reviewed_at DESC`
   );
@@ -36,12 +36,20 @@ function trackRecord(category, byScenarioId) {
   return { total, correct, accuracy };
 }
 
+// Two-Axis Trust Model: Verified Execution is binary and does not average
+// with Judgment Accuracy - a single persisted verified_execution='failed'
+// row anywhere in a category is an instant, permanent revoke for that
+// category, independent of whatever the accuracy percentage says. This is
+// now a real, persisted check (src/db/init.js added the column) rather than
+// the client-only flag this file's old comment described.
+function isExecutionRevoked(category, byScenarioId) {
+  return SCENARIOS.some(
+    (s) => s.category === category && byScenarioId.get(s.id) && byScenarioId.get(s.id).verified_execution === "failed"
+  );
+}
+
 function stageFor(category, byScenarioId) {
-  // Note: revoking a category to Learner's Permit is a client-only,
-  // non-persisted override in the current architecture (Day 3 didn't add a
-  // revoke column), so this mirrors the persisted-history-only view -
-  // consistent with what GET /api/state also reflects, not a gap introduced
-  // here.
+  if (isExecutionRevoked(category, byScenarioId)) return "revoked";
   const { total, accuracy } = trackRecord(category, byScenarioId);
   if (total >= 4 && accuracy >= 90) return "licensed";
   if (total >= 3 && accuracy >= 70) return "supervised";
@@ -72,6 +80,7 @@ async function getDecision(id) {
     options: scenario.options,
     status: reviewed ? reviewed.outcome : "pending",
     recommendation: reviewed ? reviewed.recommendation : null,
+    verifiedExecution: reviewed ? reviewed.verified_execution : null,
     reviewedAt: reviewed ? reviewed.reviewed_at : null,
   };
 }
@@ -82,12 +91,19 @@ async function getPermitStatus(category) {
   }
   const { byScenarioId } = await loadReviewedState();
   const { total, correct, accuracy } = trackRecord(category, byScenarioId);
+  const verifiedExecutionFailure = isExecutionRevoked(category, byScenarioId);
   return {
     category,
+    // "revoked" is distinct from "learner": a category with 0 reviews (or
+    // low accuracy) is legitimately "learner"; a category with a fabricated/
+    // failed claimed action is "revoked" - permanently, regardless of
+    // accuracy - and that distinction must survive out to this tool, not
+    // just the HTTP API, per the Two-Axis Trust Model.
     stage: stageFor(category, byScenarioId),
     totalReviewed: total,
     correct,
     accuracy,
+    verifiedExecutionFailure,
   };
 }
 
@@ -107,6 +123,7 @@ async function getAuditTrail(category) {
       recommendation: row.recommendation,
       outcome: row.outcome,
       stageAtTime: row.stage_at_time,
+      verifiedExecution: row.verified_execution,
       reviewedAt: row.reviewed_at,
     };
   });
