@@ -47,6 +47,13 @@
     color:var(--paper);
   }
   header.top .sub{color:var(--text-dim);font-size:14px;font-family:'IBM Plex Mono',monospace;letter-spacing:0.02em;}
+  header.top .header-right{display:flex;flex-direction:column;align-items:flex-end;gap:8px;}
+  .reset-btn{
+    font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.04em;text-transform:uppercase;
+    background:transparent;color:var(--text-dim);border:1px solid var(--line-strong);padding:6px 10px;border-radius:3px;
+    cursor:pointer;transition:border-color .15s ease,color .15s ease;
+  }
+  .reset-btn:hover{border-color:var(--amber);color:var(--amber);}
   header.top .co{font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--text-dim);text-align:right;}
   header.top .co b{color:var(--paper);font-weight:500;}
 
@@ -263,7 +270,10 @@
       <h1>The Learner's Permit</h1>
       <span class="sub">Live Decision Console</span>
     </div>
-    <div class="co">Client: <b>Thistle &amp; Vance Pest Solutions</b><br>14 locations · Multi-region operating platform</div>
+    <div class="header-right">
+      <div class="co">Client: <b>Thistle &amp; Vance Pest Solutions</b><br>14 locations · Multi-region operating platform</div>
+      <button class="reset-btn" onclick="resetMyDemo()">Reset My Demo</button>
+    </div>
   </header>
 
   <div class="layout">
@@ -659,6 +669,30 @@ async function review(id, wasCorrect, verifiedExecution){
     }
   } catch(err){
     console.error("Failed to persist review:", err.message || err);
+  }
+}
+
+// Visitor-facing reset (POST /api/reset): clears only THIS session's rows
+// server-side (see src/routes/persistence.js) - it can never touch another
+// visitor's queue, audit trail, or permit stage, so there's no reason to
+// hide the button or add friction to it.
+async function resetMyDemo(){
+  if(!confirm("Reset your demo history? This clears only what you've reviewed in this session - it never affects anyone else's.")) return;
+  try{
+    const res = await fetch("/api/reset", { method: "POST" });
+    if(!res.ok){
+      const data = await res.json().catch(()=>({}));
+      console.error("Reset failed:", data.error || res.status);
+      return;
+    }
+    state = {};
+    auditLog = [];
+    renderPermits();
+    renderQueue();
+    renderDetail();
+    renderAudit();
+  } catch(err){
+    console.error("Reset failed:", err.message || err);
   }
 }
 

@@ -33,10 +33,24 @@ ALTER TABLE decisions_log
   ADD COLUMN IF NOT EXISTS verified_execution TEXT NOT NULL DEFAULT 'confirmed';
 `;
 
+// Pivot to public/broadcast traffic (LinkedIn, not a single recruiter link):
+// every row now belongs to the visitor session that created it, so
+// concurrent visitors get their own private queue/audit-trail/permit-stage
+// instead of sharing one global state (and one visitor can no longer
+// permanently revoke a category for everyone else). '' (empty string)
+// covers rows written before this column existed - they simply belong to
+// no session and won't hydrate for any real visitor, which is fine, they
+// were seed/dev data.
+const ADD_SESSION_ID_COLUMN_SQL = `
+ALTER TABLE decisions_log
+  ADD COLUMN IF NOT EXISTS session_id TEXT NOT NULL DEFAULT '';
+`;
+
 async function initDb() {
   await query(CREATE_TABLE_SQL);
   await query(ADD_VERIFIED_EXECUTION_COLUMN_SQL);
-  console.log("decisions_log table ready (with verified_execution column).");
+  await query(ADD_SESSION_ID_COLUMN_SQL);
+  console.log("decisions_log table ready (with verified_execution, session_id columns).");
 }
 
 module.exports = { initDb };

@@ -5,15 +5,20 @@
 // fetches GET /api/state on load before its first render.
 
 // Reset persisted state to a clean slate before a test. Matches TestPlan
-// v3's K3 exactly: load the page (so a session cookie exists), call the
-// admin reset endpoint, reload so the frontend re-hydrates from the now-
-// empty database. This replaces v2's "reload = clean slate" assumption -
-// see Section 3 of TestPlan v3 for why reload alone no longer resets
-// anything.
+// v3's K3 in spirit, updated for the public-launch/session-scoping pivot:
+// POST /api/admin/reset now requires ADMIN_RESET_TOKEN (see
+// src/middleware/session.js) and is no longer the right endpoint for a
+// per-test reset. Each Playwright test already gets its own browser
+// context and therefore its own session cookie, so its rows are already
+// isolated from every other test's (see src/routes/persistence.js) - this
+// just belt-and-suspenders clears the calling session's own rows via the
+// visitor-facing POST /api/reset, the same route the page's "Reset My
+// Demo" button hits. Load the page first (so a session cookie exists),
+// reset, then reload so the frontend re-hydrates from the now-empty state.
 async function resetState(page) {
   await page.goto("/");
   await page.evaluate(async () => {
-    const res = await fetch("/api/admin/reset", { method: "POST" });
+    const res = await fetch("/api/reset", { method: "POST" });
     if (!res.ok) {
       throw new Error(`Reset failed: ${res.status} ${await res.text()}`);
     }

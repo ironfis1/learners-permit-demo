@@ -46,7 +46,9 @@ upsun url
 
 To seed realistic demo data on the live environment: `upsun ssh -- "npm run seed"`.
 
-To wipe history for a clean demo run: `curl -X POST https://<live-url>/api/admin/reset` (after loading the page once in a browser first, so a session cookie exists - same session gate as every other mutating route).
+Every visitor gets their own private queue/audit-trail/permit-stage, keyed to their session cookie - there's no shared global state to step on. A "Reset My Demo" button is right in the page header; it hits `POST /api/reset` and clears only the calling visitor's own rows. Click it as many times as you like.
+
+To wipe *everyone's* history at once (the real global reset, not exposed in any UI): `curl -X POST https://<live-url>/api/admin/reset -H "X-Admin-Token: $ADMIN_RESET_TOKEN"`. This is gated by `ADMIN_RESET_TOKEN` (see `.env.example`), a separate secret from the session cookie every visitor gets automatically - only the person holding that token can trigger it.
 
 ## MCP server (Day 4)
 
@@ -62,6 +64,7 @@ This is a work-in-progress, multi-day build. Full spec: `Upsun_Trial_LearnersPer
 
 - **Day 1:** wrapped in Express, folder scaffolding for later days, local run parity with the original artifact.
 - **Day 2:** `/api/recommendation` route holds the Anthropic key server-side and builds the prompt from the server's own trusted scenario data (client sends only a scenario id). Silent session-cookie gate plus per-session/per-IP rate limiting protect the route without adding any friction for a real visitor - see `Day2-Server-Side-API-Controls.md` for the full reasoning. Spend cap on the Anthropic key itself is a manual step, tracked above, not yet done.
-- **Day 3:** real persistence via a small Upsun-managed PostgreSQL service (`decisions_log` table). `GET /api/state` hydrates the frontend on load; `POST /api/review` writes through on every review; `POST /api/admin/reset` is an unlinked operational control for demo repeatability. `npm run seed` populates realistic demo data on demand. Deployed to Upsun.
+- **Day 3:** real persistence via a small Upsun-managed PostgreSQL service (`decisions_log` table). `GET /api/state` hydrates the frontend on load; `POST /api/review` writes through on every review. `npm run seed` populates realistic demo data on demand. Deployed to Upsun.
+- **Public launch pivot:** moved from "one recruiter link" to "public LinkedIn traffic." `decisions_log` rows are now scoped by `session_id` so concurrent visitors never see or affect each other's data. `POST /api/reset` (visitor-facing, linked from the page as "Reset My Demo") clears only the caller's own session - no auth beyond the normal session cookie, since it can't spill over. `POST /api/admin/reset` is the real global wipe, gated by a separate `ADMIN_RESET_TOKEN` secret (constant-time comparison, see `src/middleware/session.js`), not linked from any UI.
 - **Day 4 (this commit):** preview-environment data-cloning demo (branch push → Upsun clones production's Postgres data automatically, confirmed via matching `/api/state` output including timestamps; isolation confirmed via a visible code-only change present on the preview URL and absent from production). MCP server exposing 4 read-only tools (see above). Test plan reconciled to v3 and a real CI gate wired up via GitHub Actions - see above. The gate caught a real bug on its first run (malformed-JSON handling in `getRecommendation()`), fixed and reverified.
 - **Day 5:** stability/cost check, final regression pass, proactive outreach handoff.

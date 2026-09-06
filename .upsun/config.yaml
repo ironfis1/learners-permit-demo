@@ -12,6 +12,19 @@ applications:
       commands:
         start: "npm start"
 
+    # Self-healing backstop: hits the app's own admin reset route hourly so
+    # any stale or griefed rows never sit for more than an hour, even with
+    # session_id scoping already containing the blast radius of any one
+    # visitor. Runs inside this app's own container, so localhost + $PORT
+    # reaches the real running server. $ADMIN_RESET_TOKEN is the same
+    # project variable src/middleware/session.js checks - Upsun injects it
+    # into the cron's environment the same way it does for the web process.
+    crons:
+      demo_reset:
+        spec: "0 * * * *"
+        commands:
+          start: 'curl -fsS -X POST "http://localhost:${PORT}/api/admin/reset" -H "X-Admin-Token: ${ADMIN_RESET_TOKEN}"'
+
     variables:
       env:
         NODE_ENV: production

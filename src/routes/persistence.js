@@ -1,7 +1,7 @@
 const express = require("express");
 const { query } = require("../db/pool");
 const { SCENARIOS } = require("../data/scenarios");
-const { requireSession } = require("../middleware/session");
+const { requireSession, requireAdmin } = require("../middleware/session");
 
 const router = express.Router();
 
@@ -21,12 +21,19 @@ const VALID_VERIFIED_EXECUTION = new Set(["confirmed", "failed"]);
 // get_permit_status tool, see src/mcp/data.js) to distinguish "revoked for
 // a fabricated/failed claimed action" from "just low accuracy," both of
 // which are visually distinct states now.
+//
+// Scoped to the caller's own session_id: concurrent visitors (public
+// LinkedIn traffic, not one recruiter link) each get their own private
+// queue/audit-trail/permit-stage. See src/db/init.js for why this column
+// exists.
 router.get("/state", async (req, res) => {
   try {
     const result = await query(
       `SELECT scenario_id, category, recommendation, outcome, stage_at_time, verified_execution, reviewed_at
        FROM decisions_log
-       ORDER BY reviewed_at DESC`
+       WHERE session_id = $1
+       ORDER BY reviewed_at DESC`,
+      [req.sessionId || ""]
     );
     const reviewed = result.rows.map((row) => ({
       scenarioId: row.scenario_id,
@@ -89,9 +96,9 @@ router.post("/review", requireSession, express.json(), async (req, res) => {
 
   try {
     await query(
-      `INSERT INTO decisions_log (scenario_id, category, recommendation, outcome, stage_at_time, verified_execution)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [scenario.id, scenario.category, JSON.stringify(recommendation), outcome, stageAtTime, resolvedVerifiedExecution]
+      `INSERT INTO decisions_log (scenario_id, category, recommendation, outcome, stage_at_time, verified_execution, session_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [scenario.id, scenario.category, JSON.stringify(recommendation), outcome, stageAtTime, resolvedVerifiedExecution, req.sessionId || ""]
     );
     res.status(201).json({ ok: true });
   } catch (err) {
@@ -99,12 +106,26 @@ router.post("/review", requireSession, express.json(), async (req, res) => {
   }
 });
 
-// POST /api/admin/reset - operational control, not a user feature. Not
-// linked from any nav. Truncates the audit history for demo repeatability -
-// this also clears any verified_execution='failed' rows, so a permanently
-// revoked category is un-revoked by a fresh demo reset, same as every other
-// piece of persisted state.
-router.post("/admin/reset", requireSession, async (req, res) => {
+// POST /api/reset - visitor-facing control, linked from the page itself.
+// Deliberately NOT gated beyond the normal session cookie: a visitor who
+// resets only ever touches their own session_id's rows (see GET /api/state
+// and POST /api/review above), so there's no cross-visitor blast radius to
+// protect against. Let people reset their own demo as often as they like.
+router.post("/reset", requireSession, async (req, res) => {
+  try {
+    await query("DELETE FROM decisions_log WHERE session_id = $1", [req.sessionId || ""]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(502).json({ error: err.message || "Couldn't reset." });
+  }
+});
+
+// POST /api/admin/reset - the real global wipe, every session's data at
+// once. Not linked from any UI. Gated by requireAdmin (see
+// src/middleware/session.js) rather than the visitor session cookie every
+// browser gets for free - this is the one route that can affect every
+// visitor at once, so it's the one route with a real secret in front of it.
+router.post("/admin/reset", requireAdmin, async (req, res) => {
   try {
     await query("TRUNCATE TABLE decisions_log");
     res.json({ ok: true });

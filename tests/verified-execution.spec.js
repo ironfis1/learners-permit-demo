@@ -5,7 +5,7 @@
 // category, regardless of the accuracy score - no averaging, no tolerance.
 // These tests exercise that mechanic directly against the app's own global
 // functions (review, stageFor, trackRecord) and against real persisted
-// state via GET /api/state / POST /api/admin/reset, per the pattern already
+// state via GET /api/state / POST /api/reset, per the pattern already
 // established in tests/logic.spec.js.
 const { test, expect } = require("@playwright/test");
 const { resetState } = require("./helpers");
@@ -141,7 +141,7 @@ test.describe("Verified Execution - instant, permanent, binary revoke", () => {
       .poll(async () => page.evaluate(() => stageFor("dispatch")))
       .toBe("revoked");
 
-    await resetState(page); // goto("/") -> POST /api/admin/reset -> reload, per tests/helpers.js
+    await resetState(page); // goto("/") -> POST /api/reset -> reload, per tests/helpers.js
 
     const stageAfterReset = await page.evaluate(() => stageFor("dispatch"));
     expect(stageAfterReset).toBe("learner");
