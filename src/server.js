@@ -14,6 +14,27 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev-secret-change-me";
 
+// Day 5 burst/spend sanity check surfaced this: Upsun's router sits in front
+// of the app as a reverse proxy, so without telling Express that, req.ip is
+// always the router's own address - every visitor, not just concurrent ones,
+// collapses into a single bucket for perIpLimiter (see
+// src/middleware/rateLimit.js), which is keyed on req.ip via
+// express-rate-limit's default keyGenerator. Confirmed directly: two
+// separate sessions with two different (spoofed) client IPs drained the
+// *same* RateLimit-Remaining counter instead of getting their own. In
+// production that means the per-IP limit silently behaves as one shared cap
+// across all concurrent traffic, not a per-visitor one - exactly the kind of
+// thing that trips during a real recruiter-traffic burst.
+//
+// `1` = trust exactly one hop (Upsun's own router) so express derives req.ip
+// from the X-Forwarded-For entry that router sets, and no further back than
+// that. Deliberately not `true` (trust every hop) - express-rate-limit's own
+// validation flags that as ERR_ERL_PERMISSIVE_TRUST_PROXY, since it lets a
+// client trivially spoof its own X-Forwarded-For to dodge the limiter
+// entirely. If Upsun's routing layer is ever more than one hop deep, this
+// number needs to grow to match - it's a hop *count*, not a boolean.
+app.set("trust proxy", Number(process.env.TRUST_PROXY_HOPS || 1));
+
 app.use(cookieParser(SESSION_SECRET));
 app.use(issueSessionOnGet); // silently issues a session cookie on GET requests only
 
