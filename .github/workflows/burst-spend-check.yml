@@ -1,0 +1,55 @@
+name: Burst / Spend Sanity Check (Day 5)
+
+# Manually triggered - Day 5 task (U2/U3 from Day5-Polish-CostCheck-Outreach.md,
+# issue #3): fire a short burst at POST /api/recommendation and confirm rate
+# limiting actually kicks in as expected, not just that the code exists.
+#
+# Runs two simulated visitors (two separate session cookies) from this one
+# runner, each firing a few rapid real calls - real Anthropic spend, kept
+# deliberately small (a handful of calls, not enough to fully exhaust either
+# limiter's hourly cap). Reports each call's HTTP status and the
+# RateLimit-* response headers so a human can eyeball whether per-session and
+# per-IP limiting are behaving sanely, then cross-check actual spend in the
+# Anthropic console against the configured cap.
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Live URL to test against"
+        required: true
+        type: string
+      calls_per_session:
+        description: "Real POST /api/recommendation calls per simulated visitor"
+        required: false
+        type: string
+        default: "4"
+
+jobs:
+  burst-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fire burst from two simulated visitors
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+          CALLS: ${{ inputs.calls_per_session }}
+        run: |
+          set -u
+          for VISITOR in A B; do
+            echo "=== Visitor $VISITOR ==="
+            JAR="cookies-$VISITOR.txt"
+            rm -f "$JAR"
+            curl -sS -c "$JAR" -o /dev/null "$BASE_URL/"
+            for i in $(seq 1 "$CALLS"); do
+              STATUS_AND_HEADERS=$(curl -sS -b "$JAR" -X POST "$BASE_URL/api/recommendation" \
+                -H "Content-Type: application/json" \
+                -d "{\"id\": $(( (i % 16) + 1 ))}" \
+                -D - -o /tmp/body_${VISITOR}_${i}.json -w "HTTP_STATUS:%{http_code}\n")
+              STATUS=$(echo "$STATUS_AND_HEADERS" | grep -o "HTTP_STATUS:[0-9]*")
+              REMAIN=$(echo "$STATUS_AND_HEADERS" | grep -i "ratelimit-remaining" | tr -d '\r')
+              LIMIT=$(echo "$STATUS_AND_HEADERS" | grep -i "ratelimit-limit:" | tr -d '\r')
+              echo "  call $i: $STATUS  $LIMIT  $REMAIN"
+              if echo "$STATUS" | grep -q "429"; then
+                echo "  -> rate limit engaged, body: $(cat /tmp/body_${VISITOR}_${i}.json)"
+              fi
+            done
+          done
