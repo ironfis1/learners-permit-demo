@@ -48,8 +48,9 @@ jobs:
               REMAIN=$(echo "$STATUS_AND_HEADERS" | grep -i "ratelimit-remaining" | tr -d '\r')
               LIMIT=$(echo "$STATUS_AND_HEADERS" | grep -i "ratelimit-limit:" | tr -d '\r')
               echo "::notice title=Visitor $VISITOR call $i::$STATUS  $LIMIT  $REMAIN"
-              if echo "$STATUS" | grep -q "429"; then
-                echo "::notice title=Visitor $VISITOR call $i RATE LIMITED::$(cat /tmp/body_${VISITOR}_${i}.json)"
+              if ! echo "$STATUS" | grep -q "HTTP_STATUS:200"; then
+                BODY=$(cat /tmp/body_${VISITOR}_${i}.json | tr '\n' ' ' | cut -c1-400)
+                echo "::warning title=Visitor $VISITOR call $i NON-200 BODY::$BODY"
               fi
             done
           done
