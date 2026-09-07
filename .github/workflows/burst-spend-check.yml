@@ -47,9 +47,9 @@ jobs:
               STATUS=$(echo "$STATUS_AND_HEADERS" | grep -o "HTTP_STATUS:[0-9]*")
               REMAIN=$(echo "$STATUS_AND_HEADERS" | grep -i "ratelimit-remaining" | tr -d '\r')
               LIMIT=$(echo "$STATUS_AND_HEADERS" | grep -i "ratelimit-limit:" | tr -d '\r')
-              echo "  call $i: $STATUS  $LIMIT  $REMAIN"
+              echo "::notice title=Visitor $VISITOR call $i::$STATUS  $LIMIT  $REMAIN"
               if echo "$STATUS" | grep -q "429"; then
-                echo "  -> rate limit engaged, body: $(cat /tmp/body_${VISITOR}_${i}.json)"
+                echo "::notice title=Visitor $VISITOR call $i RATE LIMITED::$(cat /tmp/body_${VISITOR}_${i}.json)"
               fi
             done
           done
