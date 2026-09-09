@@ -177,6 +177,32 @@
   .decision-row .left{display:flex;flex-direction:column;gap:3px;min-width:0;}
   .decision-row .title{font-size:14.5px;color:var(--text);}
   .decision-row .meta{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--text-dim);}
+
+  /* ---- QUEUE CATEGORY GROUPS (collapsible) ---- */
+  .queue-category{border-bottom:1px solid var(--line);}
+  .queue-category:last-child{border-bottom:none;}
+  .queue-category-head{
+    padding:11px 18px;display:flex;justify-content:space-between;align-items:center;gap:10px;
+    cursor:pointer;background:var(--panel-2);transition:background .15s ease;
+  }
+  .queue-category-head:hover{background:#262c38;}
+  .queue-category-head .cat-left{display:flex;align-items:center;gap:10px;min-width:0;}
+  .queue-category-head .chev{
+    font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-dim);
+    display:inline-block;transition:transform .15s ease;
+  }
+  .queue-category.open .queue-category-head .chev{transform:rotate(90deg);}
+  .queue-category-head .cat-name{
+    font-family:'Barlow Condensed',sans-serif;font-size:15px;letter-spacing:0.03em;
+    text-transform:uppercase;color:var(--paper);font-weight:600;
+  }
+  .queue-category-head .cat-count{
+    font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-dim);
+    border:1px solid var(--line-strong);padding:1px 7px;border-radius:10px;
+  }
+  .queue-category-rows{display:none;}
+  .queue-category.open .queue-category-rows{display:block;}
+
   .tag{
     font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.05em;text-transform:uppercase;
     padding:3px 7px;border-radius:2px;white-space:nowrap;border:1px solid var(--line-strong);color:var(--text-dim);
@@ -458,6 +484,19 @@ function freshState(){
 let state = freshState();
 let activeId = null;
 let auditLog = [];
+// Which categories are expanded in the Decision Queue. Initialized lazily on
+// the first renderQueue() call so it can look at which categories actually
+// have pending items - the first category (in CATEGORIES order) that has at
+// least one pending decision starts open, everything else starts collapsed.
+// After that it's untouched by renderQueue()'s own re-renders (judging a
+// decision, auto-drain progress, etc.) - only toggleQueueCategory() changes
+// it, so a section a visitor opened stays open across those refreshes.
+let queueOpenCategories = null;
+
+function toggleQueueCategory(cat){
+  queueOpenCategories[cat] = !queueOpenCategories[cat];
+  renderQueue();
+}
 // True once BOTH axes are set for a decision - it's removed from the queue
 // and appears only in the audit trail from that point on.
 function isResolved(id){
@@ -590,32 +629,61 @@ function renderQueue(){
   // assuming the app stalled.
   const items = SCENARIOS.filter(s=>!isResolved(s.id));
   document.getElementById("queue-count").textContent = items.length + " pending";
-  document.getElementById("queue-list").innerHTML = items.map(s=>{
-    const st = state[s.id];
-    // Three visually distinct waiting states, on purpose: "pending" (gray,
-    // untouched), "inflight" (amber, pulsing - actively fetching a response
-    // or verification right now), and "awaiting-verification" (gold, static
-    // - Judgment already resolved, sitting still, waiting on a human to
-    // click Confirmed/Failed). A judged-but-unverified item never shows the
-    // plain correct/incorrect color here - that would read as fully closed
-    // when it isn't (see stageFor()'s Licensed gate, which won't advance
-    // the category while any dot is in this state).
-    const dotClass = st.inFlight
-      ? "inflight"
-      : (st.status!=="pending" && st.verifiedExecution===null)
-        ? "awaiting-verification"
-        : st.status;
+
+  // Group pending items by category, in CATEGORIES' declared order, so the
+  // queue reads as collapsible sections instead of one long scrolling list.
+  const byCategory = {};
+  Object.keys(CATEGORIES).forEach(cat => byCategory[cat] = []);
+  items.forEach(s => byCategory[s.category].push(s));
+
+  if(!queueOpenCategories){
+    queueOpenCategories = {};
+    const firstWithItems = Object.keys(CATEGORIES).find(cat => byCategory[cat].length>0);
+    Object.keys(CATEGORIES).forEach(cat => { queueOpenCategories[cat] = (cat===firstWithItems); });
+  }
+
+  document.getElementById("queue-list").innerHTML = Object.keys(CATEGORIES).map(cat=>{
+    const catItems = byCategory[cat];
+    if(catItems.length===0) return "";
+    const isOpen = !!queueOpenCategories[cat];
+    const rows = catItems.map(s=>{
+      const st = state[s.id];
+      // Three visually distinct waiting states, on purpose: "pending" (gray,
+      // untouched), "inflight" (amber, pulsing - actively fetching a
+      // response or verification right now), and "awaiting-verification"
+      // (gold, static - Judgment already resolved, sitting still, waiting
+      // on a human to click Confirmed/Failed). A judged-but-unverified item
+      // never shows the plain correct/incorrect color here - that would
+      // read as fully closed when it isn't (see stageFor()'s Licensed gate,
+      // which won't advance the category while any dot is in this state).
+      const dotClass = st.inFlight
+        ? "inflight"
+        : (st.status!=="pending" && st.verifiedExecution===null)
+          ? "awaiting-verification"
+          : st.status;
+      return `
+      <div class="decision-row ${activeId===s.id?'active':''}" onclick="selectDecision(${s.id})">
+        <div class="left">
+          <div class="title">${s.title}</div>
+          <div class="meta">${s.location} · ${CATEGORIES[s.category].short}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          ${st.inFlight ? '<span class="pending-badge">Pending</span>' : ''}
+          <span class="tag">${CATEGORIES[s.category].short}</span>
+          <span class="status-dot ${dotClass}"></span>
+        </div>
+      </div>`;
+    }).join("");
     return `
-    <div class="decision-row ${activeId===s.id?'active':''}" onclick="selectDecision(${s.id})">
-      <div class="left">
-        <div class="title">${s.title}</div>
-        <div class="meta">${s.location} · ${CATEGORIES[s.category].short}</div>
+    <div class="queue-category ${isOpen?'open':''}">
+      <div class="queue-category-head" onclick="toggleQueueCategory('${cat}')">
+        <div class="cat-left">
+          <span class="chev">&#9656;</span>
+          <span class="cat-name">${CATEGORIES[cat].label}</span>
+        </div>
+        <span class="cat-count">${catItems.length}</span>
       </div>
-      <div style="display:flex;align-items:center;gap:10px;">
-        ${st.inFlight ? '<span class="pending-badge">Pending</span>' : ''}
-        <span class="tag">${CATEGORIES[s.category].short}</span>
-        <span class="status-dot ${dotClass}"></span>
-      </div>
+      <div class="queue-category-rows">${rows}</div>
     </div>`;
   }).join("");
 }
@@ -1006,6 +1074,7 @@ async function resetMyDemo(){
     auditLog = [];
     autoDrainRunning = {};
     activeId = null;
+    queueOpenCategories = null;
     renderPermits();
     renderQueue();
     renderDetail();
