@@ -1092,7 +1092,16 @@ async function hydrateFromServer(){
 hydrateFromServer().finally(()=>{
   renderPermits();
   renderQueue();
-  renderDetail();
+  // This fetch races the very first thing a fast visitor (or a test) can
+  // do: select a decision and click Get Recommendation, whose response/
+  // error is a direct DOM patch under #rec-area, never reflected in state
+  // until it resolves. If that happened while this was still in flight,
+  // an unconditional renderDetail() here would rebuild #detail from
+  // state[activeId] (still untouched) and silently wipe it. Skip the
+  // rebuild once the user has already navigated into something - the
+  // static "Select a decision..." markup already covers the untouched
+  // case, so this is a no-op when activeId is still null anyway.
+  if(!activeId) renderDetail();
   renderAudit();
   // A reload can land on a category that's already Supervised or Licensed
   // from persisted history - resume draining immediately rather than
