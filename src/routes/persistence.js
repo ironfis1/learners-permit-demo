@@ -6,6 +6,12 @@ const { requireSession, requireAdmin } = require("../middleware/session");
 const router = express.Router();
 
 const VALID_CATEGORIES = new Set(Object.keys(require("../data/scenarios").CATEGORIES));
+// outcome is always "correct" or "incorrect" - Judgment Accuracy, graded and
+// gradual. Whether it was set by a human or by the Supervised-stage
+// auto-response step is tracked separately via auto_judgment (see below) and
+// never changes how it counts toward trackRecord()/stageFor() in
+// public/index.html - an auto-judged decision counts toward accuracy exactly
+// like a manually-judged one, immediately.
 const VALID_OUTCOMES = new Set(["correct", "incorrect"]);
 // Two-Axis Trust Model: Verified Execution is binary and separate from the
 // Judgment Accuracy outcome above - see src/db/init.js for why this column
@@ -29,7 +35,7 @@ const VALID_VERIFIED_EXECUTION = new Set(["confirmed", "failed"]);
 router.get("/state", async (req, res) => {
   try {
     const result = await query(
-      `SELECT scenario_id, category, recommendation, outcome, stage_at_time, verified_execution, reviewed_at
+      `SELECT scenario_id, category, recommendation, outcome, stage_at_time, verified_execution, auto_judgment, auto_verification, reviewed_at
        FROM decisions_log
        WHERE session_id = $1
        ORDER BY reviewed_at DESC`,
@@ -40,6 +46,8 @@ router.get("/state", async (req, res) => {
       category: row.category,
       recommendation: row.recommendation,
       outcome: row.outcome,
+      autoJudgment: row.auto_judgment,
+      autoVerification: row.auto_verification,
       stageAtTime: row.stage_at_time,
       verifiedExecution: row.verified_execution,
       reviewedAt: row.reviewed_at,
@@ -56,9 +64,10 @@ router.get("/state", async (req, res) => {
 // POST /api/review - persists a reviewed decision. Session-gated (Day 2),
 // same as the other mutating route. Not rate-limited the way the Anthropic
 // call is - this doesn't hit any paid API, and legitimate use can mark up
-// to 16 decisions in a single sitting.
+// to 20 decisions in a single sitting (5 per category since the auto-execute
+// scope add - see src/data/scenarios.js).
 router.post("/review", requireSession, express.json(), async (req, res) => {
-  const { id, outcome, recommendation, stageAtTime, verifiedExecution } = req.body || {};
+  const { id, outcome, recommendation, stageAtTime, verifiedExecution, autoJudgment, autoVerification } = req.body || {};
   const scenarioId = Number(id);
   const scenario = SCENARIOS.find((s) => s.id === scenarioId);
 
@@ -79,6 +88,19 @@ router.post("/review", requireSession, express.json(), async (req, res) => {
   if (typeof stageAtTime !== "string" || !["learner", "supervised", "licensed", "revoked"].includes(stageAtTime)) {
     return res.status(400).json({ error: "stageAtTime is missing or invalid." });
   }
+  // autoJudgment/autoVerification are provenance flags, not grades - they
+  // never change what outcome/verifiedExecution mean, only how the audit
+  // trail and detail view describe how a value was set. Reject the
+  // combinations that can't happen given the stage a decision resolved at:
+  // Judgment only auto-resolves at Supervised or later (Learner is fully
+  // manual), Verified Execution only auto-resolves at Licensed or later
+  // (Supervised keeps it manual).
+  if (autoJudgment && stageAtTime === "learner") {
+    return res.status(400).json({ error: "autoJudgment can't be true at stageAtTime:'learner'." });
+  }
+  if (autoVerification && stageAtTime !== "licensed" && stageAtTime !== "revoked") {
+    return res.status(400).json({ error: "autoVerification requires stageAtTime:'licensed' or 'revoked'." });
+  }
   if (!VALID_CATEGORIES.has(scenario.category)) {
     return res.status(400).json({ error: "Unknown category." });
   }
@@ -96,9 +118,9 @@ router.post("/review", requireSession, express.json(), async (req, res) => {
 
   try {
     await query(
-      `INSERT INTO decisions_log (scenario_id, category, recommendation, outcome, stage_at_time, verified_execution, session_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [scenario.id, scenario.category, JSON.stringify(recommendation), outcome, stageAtTime, resolvedVerifiedExecution, req.sessionId || ""]
+      `INSERT INTO decisions_log (scenario_id, category, recommendation, outcome, stage_at_time, verified_execution, session_id, auto_judgment, auto_verification)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [scenario.id, scenario.category, JSON.stringify(recommendation), outcome, stageAtTime, resolvedVerifiedExecution, req.sessionId || "", !!autoJudgment, !!autoVerification]
     );
     res.status(201).json({ ok: true });
   } catch (err) {

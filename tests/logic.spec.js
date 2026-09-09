@@ -1,14 +1,28 @@
-// TestPlan v3 Groups D, E, F, G - the staged-autonomy algorithm, instant
-// revoke, and cross-category isolation. Driven via page.evaluate() calling
-// the app's own global functions directly (review, revoke, stageFor,
-// trackRecord), per TestPlan v3 Section 8. review() is async (it writes
-// through to POST /api/review as of Day 3) - each call is awaited inside
-// the evaluated function, so by the time page.evaluate() resolves, the
-// write has actually landed, not just the client-side state update.
+// TestPlan v4 Groups D, E, F, G - the staged-autonomy algorithm, instant
+// revoke, and cross-category isolation, updated for the 3-tier automation
+// model: Learner is fully manual (response, Judgment, Verified Execution);
+// Supervised auto-fetches responses and auto-marks Judgment on arrival,
+// leaving Verified Execution manual; Licensed automates both axes. review()
+// is still async and still writes through to POST /api/review, same as
+// before - each call is awaited inside the evaluated function, so by the
+// time page.evaluate() resolves, the write has actually landed, not just
+// the client-side state update.
+//
+// /api/recommendation is blocked (never resolves) for every test in this
+// file. These tests manipulate state and call review()/setJudgment()/
+// setVerification() directly, exactly like the original suite did, and
+// several of them deliberately cross a category into Supervised or Licensed
+// as a side effect of that. The moment a category crosses either threshold,
+// the app's own auto-drain pool starts fetching recommendations for that
+// category's remaining scenarios in the background (see maybeAutoDrainAll()
+// in public/index.html) - without the block, those background fetches would
+// race this file's direct state manipulation and its assertions about exact
+// accuracy numbers.
 const { test, expect } = require("@playwright/test");
-const { resetState } = require("./helpers");
+const { resetState, blockRecommendation } = require("./helpers");
 
 test.beforeEach(async ({ page }) => {
+  await blockRecommendation(page);
   await resetState(page);
 });
 
@@ -39,6 +53,39 @@ test.describe("Group D - Review / Marking", () => {
     await page.evaluate(() => { selectDecision(3); });
     await expect(page.locator(".review-result.correct")).toBeVisible();
     await expect(page.locator("#get-rec-btn")).toHaveCount(0);
+  });
+
+  test("D4: setting only Judgment resolves the status immediately but leaves the decision in the queue", async ({ page }) => {
+    const result = await page.evaluate(() => {
+      state[1].recommendation = { recommendation: "x", reasoning: "y", confidence: 80 };
+      setJudgment(1, true, false);
+      return { status: state[1].status, verifiedExecution: state[1].verifiedExecution, resolved: isResolved(1) };
+    });
+    expect(result).toEqual({ status: "correct", verifiedExecution: null, resolved: false });
+    // 23 total scenarios - none resolved yet, so the queue is untouched.
+    await expect(page.locator(".decision-row")).toHaveCount(23);
+  });
+
+  test("D5: setting Verified Execution after Judgment resolves the decision and removes it from the queue", async ({ page }) => {
+    await page.evaluate(() => {
+      state[1].recommendation = { recommendation: "x", reasoning: "y", confidence: 80 };
+      setJudgment(1, true, false);
+      setVerification(1, true, false);
+    });
+    const resolved = await page.evaluate(() => isResolved(1));
+    expect(resolved).toBe(true);
+    await expect(page.locator(".decision-row")).toHaveCount(22);
+    await expect(page.locator("#queue-count")).toHaveText("22 pending");
+  });
+
+  test("D6: a decision only appears in the audit trail once both axes are set", async ({ page }) => {
+    await page.evaluate(() => {
+      state[1].recommendation = { recommendation: "x", reasoning: "y", confidence: 80 };
+      setJudgment(1, true, false);
+    });
+    await expect(page.locator(".audit-row")).toHaveCount(0);
+    await page.evaluate(() => { setVerification(1, true, false); });
+    await expect(page.locator(".audit-row")).toHaveCount(1);
   });
 });
 
@@ -90,6 +137,28 @@ test.describe("Group E - Trust-Building Algorithm (exact sequences)", () => {
     });
     expect(result.track).toEqual({ total: 4, correct: 3, accuracy: 75 });
     expect(result.stage).toBe("supervised");
+  });
+
+  test("E5: once a category reaches Supervised, its remaining decisions show a Pending marker while auto-response is in flight", async ({ page }) => {
+    await page.evaluate(async () => {
+      for (const id of [1, 2, 3]) {
+        state[id].recommendation = { recommendation: "x", reasoning: "y", confidence: 80 };
+        await review(id, true);
+      }
+    });
+    // /api/recommendation is blocked in this file, so the auto-drain pool's
+    // fetch for dispatch's two remaining scenarios (4 and 17) starts but
+    // never completes - a stable window to assert the Pending marker
+    // renders, rather than racing a fetch that would actually finish.
+    await expect
+      .poll(async () => page.evaluate(() => Boolean(state[4].inFlight || state[17].inFlight)))
+      .toBe(true);
+    await expect(page.locator(".pending-badge")).not.toHaveCount(0);
+    // The two in-flight scenarios are still unresolved and still in the
+    // queue - only Judgment/Verified Execution resolution removes a row,
+    // not merely being picked up by the pool.
+    const stillQueued = await page.evaluate(() => !isResolved(4) && !isResolved(17));
+    expect(stillQueued).toBe(true);
   });
 });
 

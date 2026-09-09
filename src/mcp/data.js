@@ -13,7 +13,7 @@ const VALID_CATEGORIES = new Set(Object.keys(CATEGORIES));
 // takes the latest row per scenario defensively in case of a re-review.
 async function loadReviewedState() {
   const result = await query(
-    `SELECT scenario_id, category, recommendation, outcome, stage_at_time, verified_execution, reviewed_at
+    `SELECT scenario_id, category, recommendation, outcome, stage_at_time, verified_execution, auto_judgment, auto_verification, reviewed_at
      FROM decisions_log
      ORDER BY reviewed_at DESC`
   );
@@ -26,10 +26,19 @@ async function loadReviewedState() {
   return { byScenarioId, orderedRows: result.rows };
 }
 
+// Mirrors public/index.html's client-side trackRecord() exactly: outcome is
+// always "correct" or "incorrect" (see VALID_OUTCOMES in
+// src/routes/persistence.js), and this filter keeps that explicit rather
+// than trusting every row in the table to already satisfy it. Whether a row
+// was auto-judged (Supervised or later - see auto_judgment) counts toward
+// accuracy identically to a human-judged one, immediately - that's the point
+// of the Supervised automation. Getting this filter out of sync between the
+// two copies would make the MCP tools quietly report a different accuracy
+// (and possibly a different stage) than the UI shows for the same category.
 function trackRecord(category, byScenarioId) {
   const items = SCENARIOS.filter((s) => s.category === category)
     .map((s) => byScenarioId.get(s.id))
-    .filter(Boolean);
+    .filter((r) => r && (r.outcome === "correct" || r.outcome === "incorrect"));
   const total = items.length;
   const correct = items.filter((r) => r.outcome === "correct").length;
   const accuracy = total ? Math.round((correct / total) * 100) : 0;
@@ -80,6 +89,8 @@ async function getDecision(id) {
     options: scenario.options,
     status: reviewed ? reviewed.outcome : "pending",
     recommendation: reviewed ? reviewed.recommendation : null,
+    autoJudgment: reviewed ? reviewed.auto_judgment : false,
+    autoVerification: reviewed ? reviewed.auto_verification : false,
     verifiedExecution: reviewed ? reviewed.verified_execution : null,
     reviewedAt: reviewed ? reviewed.reviewed_at : null,
   };
@@ -122,6 +133,8 @@ async function getAuditTrail(category) {
       title: scenario ? scenario.title : null,
       recommendation: row.recommendation,
       outcome: row.outcome,
+      autoJudgment: row.auto_judgment,
+      autoVerification: row.auto_verification,
       stageAtTime: row.stage_at_time,
       verifiedExecution: row.verified_execution,
       reviewedAt: row.reviewed_at,

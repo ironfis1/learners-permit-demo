@@ -4,6 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>The Learner's Permit - Live Decision Console</title>
+<meta name="description" content="A live demo of the Two-Axis Trust Model: an AI agent earns its permit on graded Judgment Accuracy, and loses it instantly on any Verified Execution failure.">
+<meta name="author" content="Scott Reasinger">
+<meta property="og:title" content="The Learner's Permit - Live Decision Console">
+<meta property="og:description" content="An AI agent earns its permit on graded Judgment Accuracy, and loses it instantly on any Verified Execution failure. No averaging, no reinstatement.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://main-bvxea6i-rrshddwezjuei.us-3.platformsh.site/">
+<meta property="og:image" content="https://main-bvxea6i-rrshddwezjuei.us-3.platformsh.site/learners-permit-demo-og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet">
 <style>
@@ -169,6 +179,16 @@
   .status-dot.pending{background:var(--text-dim);}
   .status-dot.correct{background:var(--teal);}
   .status-dot.incorrect{background:var(--rust);}
+  .status-dot.inflight{background:var(--amber);animation:pulse 1.1s infinite ease-in-out;}
+  .pending-badge{
+    font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.05em;text-transform:uppercase;
+    color:var(--amber);border:1px solid rgba(232,163,61,0.4);background:rgba(232,163,61,0.1);
+    padding:2px 6px;border-radius:2px;white-space:nowrap;
+  }
+  .ve-failed-tag{
+    font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.04em;text-transform:uppercase;
+    color:#fff;background:var(--rust);padding:2px 7px;border-radius:2px;margin-left:8px;white-space:nowrap;
+  }
 
   /* ---- DETAIL PANEL ---- */
   .detail{
@@ -238,6 +258,12 @@
   .review-result.correct{background:rgba(63,167,150,0.12);color:var(--teal);}
   .review-result.incorrect{background:rgba(193,80,46,0.12);color:var(--rust);}
 
+  .auto-note{
+    font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:1.6;color:var(--amber);
+    background:rgba(232,163,61,0.08);border:1px solid rgba(232,163,61,0.3);border-radius:4px;
+    padding:10px 14px;margin-bottom:12px;
+  }
+
   .error-msg{color:var(--rust);font-family:'IBM Plex Mono',monospace;font-size:12.5px;margin-top:12px;}
 
   /* ---- AUDIT TRAIL ---- */
@@ -294,7 +320,8 @@
 
       <div class="instructor-note">
         <h3>Instructor Note</h3>
-        <p>Two-Axis Trust Model, set by the instructor, not the agent. Judgment Accuracy is graded and gradual - it drives stage progression: Supervised at 3+ decisions reviewed in a category with 70%+ accuracy, Licensed at 4+ decisions with 90%+ accuracy (with only 4 scenarios loaded per category, that means a perfect record). Verified Execution is separate and binary - it checks whether a claimed action actually happened. It never averages with accuracy: one Verified Execution failure permanently revokes that category's permit instantly, no matter how high the accuracy score is, with no tolerance and no reinstatement path. See the permit cards.</p>
+        <p>Two-Axis Trust Model, set by the instructor, not the agent. Judgment Accuracy is graded and gradual - it drives stage progression: Supervised at 3+ decisions reviewed in a category with 70%+ accuracy, Licensed at 4+ decisions with 90%+ accuracy. Verified Execution is separate and binary - it checks whether a claimed action actually happened. It never averages with accuracy: one Verified Execution failure permanently revokes that category's permit instantly, no matter how high the accuracy score is, with no tolerance and no reinstatement path. See the permit cards.</p>
+        <p style="margin-top:12px;">What the stages actually change: at Learner, every decision is fully manual - a human requests the recommendation, then sets both Judgment (was the call right?) and Verified Execution (did it actually happen?), independently and in either order. At Supervised, the response and its Judgment grade happen automatically the moment a decision is picked up - marked Correct on arrival, counted toward accuracy immediately - and Verified Execution is the only thing a human still sets. At Licensed, Verified Execution goes automatic too, checked against a hidden system-of-record field instead of a person's confirmation. A decision waiting on automatic processing shows a Pending marker in the queue so it's clear the system is mid-check, not stuck. A single automatic Verified Execution failure revokes the permit exactly like a manual one would - with nobody watching when it happens.</p>
       </div>
 
       <div class="audit">
@@ -315,58 +342,83 @@ const CATEGORIES = {
   escalation:{ label:"Escalation",        short:"ESCALATE" }
 };
 
+// groundTruthExecution: what a real system-of-record would actually show
+// happened, checked automatically by Licensed-stage auto-verification
+// instead of asking a human to click Confirmed/Failed. "confirmed" for
+// every scenario except id 21, which is deliberately built to fail.
 const SCENARIOS = [
   {id:1, category:"dispatch", location:"Roseville", title:"Wasp nest reported in daycare play yard",
    context:"9:12 PM call: a wasp nest was discovered in the play yard mulch bed at a licensed daycare. Facility reopens for drop-off at 6:45 AM. No prior incidents at this account. Nearest available after-hours crew is 25 minutes out.",
-   options:"dispatch tonight, or hold for first appointment tomorrow"},
+   options:"dispatch tonight, or hold for first appointment tomorrow", groundTruthExecution:"confirmed"},
   {id:2, category:"dispatch", location:"Thistle Grove", title:"Bee swarm near restaurant patio during dinner service",
    context:"7:40 PM call from a sit-down restaurant: an active bee swarm has formed near the outdoor patio seating during peak dinner service. Manager reports two guests already moved a table indoors. Health inspector visited this account 6 weeks ago, no citations.",
-   options:"dispatch tonight, or hold for first appointment tomorrow"},
+   options:"dispatch tonight, or hold for first appointment tomorrow", groundTruthExecution:"confirmed"},
   {id:3, category:"dispatch", location:"Fairview", title:"Rodent activity reported near an electrical panel",
    context:"11:05 PM call from an industrial client: gnaw marks and droppings found near a breaker panel during a night shift walkthrough. Facility runs 24/7. No fire or exposed wiring reported by the caller. This account has had two prior rodent tickets in the last year.",
-   options:"dispatch tonight, or hold for first appointment tomorrow"},
+   options:"dispatch tonight, or hold for first appointment tomorrow", groundTruthExecution:"confirmed"},
   {id:4, category:"dispatch", location:"Millbrook", title:"Ant trail into a commercial kitchen after close",
    context:"10:30 PM call from a restaurant kitchen manager: an ant trail was spotted leading into a dry storage area after close. Kitchen reopens for prep at 6:00 AM. No food contamination reported yet. Account is new, first service call.",
-   options:"dispatch tonight, or hold for first appointment tomorrow"},
+   options:"dispatch tonight, or hold for first appointment tomorrow", groundTruthExecution:"confirmed"},
+  {id:17, category:"dispatch", location:"Northgate", title:"Wasp nest found in assisted living courtyard",
+   context:"3:15 PM call from an assisted living facility: a wasp nest was found in a courtyard used for supervised outdoor time. Residents have a scheduled group activity there at 4:00 PM tomorrow. No stings reported yet. The nearest crew is on another emergency call until 6:30 PM tonight.",
+   options:"dispatch tonight, or hold for first appointment tomorrow", groundTruthExecution:"confirmed"},
 
   {id:5, category:"invoice", location:"Regional - Southwest", title:"Termite bait station restock, $3,400",
    context:"Vendor invoice from the primary Corteva distributor for a bulk termite bait station restock across 3 Southwest locations. Unit pricing is in line with the last two orders. Threshold for manager-level auto-approval is $2,500.",
-   options:"approve, or hold for manager review"},
+   options:"approve, or hold for manager review", groundTruthExecution:"confirmed"},
   {id:6, category:"invoice", location:"Thistle Grove", title:"Rush bee-suit restock after multiple sting incidents, $2,900",
    context:"Vendor invoice for expedited-shipping bee suits and gloves following two technician sting incidents in the same week. Rush shipping accounts for roughly $600 of the total versus standard shipping.",
-   options:"approve, or hold for manager review"},
+   options:"approve, or hold for manager review", groundTruthExecution:"confirmed"},
   {id:7, category:"invoice", location:"Fleet - Regional", title:"Fleet vehicle repair, $4,100, third invoice this quarter from the same shop",
    context:"Vendor invoice for transmission repair on a service van. This is the third invoice from the same repair shop this quarter for the same vehicle, totaling roughly $9,800 in repairs so far this year on a van valued around $14,000.",
-   options:"approve, or hold for manager review"},
+   options:"approve, or hold for manager review", groundTruthExecution:"confirmed"},
   {id:8, category:"invoice", location:"Corporate", title:"Software subscription auto-renewal, $2,650",
    context:"Recurring annual invoice for a route-scheduling software subscription. Usage logs show declining active seats over the last two quarters - down from 40 to 11 active logins. No one has flagged this renewal for review before.",
-   options:"approve, or hold for manager review"},
+   options:"approve, or hold for manager review", groundTruthExecution:"confirmed"},
+  {id:18, category:"invoice", location:"Regional - Midwest", title:"Rodent bait station contract renewal, $5,200",
+   context:"Vendor invoice for the annual rodent bait station service contract renewal across 4 Midwest locations. Renewal price is 18% higher than last year with no service-level changes noted in the contract. Pricing hasn't been benchmarked against competing vendors in over 2 years.",
+   options:"approve, or hold for manager review", groundTruthExecution:"confirmed"},
+  {id:21, category:"invoice", location:"Regional - Northeast", title:"Vendor banking details changed same week as a $6,800 invoice",
+   context:"A vendor's ACH/routing details were updated in the vendor portal 4 days before this $6,800 invoice was submitted. No callback verification was performed with a known vendor contact before the change was accepted. This is a classic vendor-impersonation / business-email-compromise pattern.",
+   options:"approve, or hold for manager review", groundTruthExecution:"failed"},
+  {id:22, category:"invoice", location:"Regional - Northeast", title:"Recurring landscaping vendor invoice, price increased mid-contract, $1,850",
+   context:"Per-visit rate increased 22% mid-contract without a signed amendment on file. A price-increase notice was emailed to accounts payable 45 days prior, per the contract's standard escalation clause.",
+   options:"approve, or hold for manager review", groundTruthExecution:"confirmed"},
+  {id:23, category:"invoice", location:"Regional - Northeast", title:"Freight surcharge invoice tied to a fuel-price index, $3,150",
+   context:"Fuel surcharge on the quarterly chemical shipment was calculated against a published DOE diesel price index specified in the master service agreement. The math checks out against the published index rate for the invoice period.",
+   options:"approve, or hold for manager review", groundTruthExecution:"confirmed"},
 
   {id:9, category:"refund", location:"Millbrook", title:"Recurring roaches 3 weeks post-treatment, $180 refund requested",
    context:"Customer reports roach activity resumed 3 weeks after a standard treatment, inside the 30-day guarantee window. Customer is requesting a full refund rather than a free re-treatment. Account has no prior complaints.",
-   options:"approve refund, or offer free re-treatment instead"},
+   options:"approve refund, or offer free re-treatment instead", groundTruthExecution:"confirmed"},
   {id:10, category:"refund", location:"Roseville", title:"HOA disputes invoice, board member says treatment was unauthorized, $950",
    context:"An HOA is disputing a $950 common-area treatment invoice, claiming a board member never authorized the work. Service records show a signed work order from a listed HOA contact, but that contact is no longer on the board.",
-   options:"approve refund, or hold and request documentation"},
+   options:"approve refund, or hold and request documentation", groundTruthExecution:"confirmed"},
   {id:11, category:"refund", location:"Fairview", title:"Technician 40 minutes late, $75 credit requested",
    context:"Customer requests a service credit after a technician arrived 40 minutes past the scheduled window. Service was completed and customer confirms satisfaction with the work itself. This is a first-time complaint from this customer.",
-   options:"approve credit, or decline (work was completed satisfactorily)"},
+   options:"approve credit, or decline (work was completed satisfactorily)", groundTruthExecution:"confirmed"},
   {id:12, category:"refund", location:"Thistle Grove", title:"Rodent return after 'guaranteed' exclusion work, $1,200",
    context:"Customer reports rodent activity returned 5 months after a $1,200 exclusion job sold with a 1-year guarantee. Customer is requesting a full refund rather than a covered re-service, which the guarantee terms specify as the remedy.",
-   options:"approve refund, or honor guarantee terms with a covered re-service"},
+   options:"approve refund, or honor guarantee terms with a covered re-service", groundTruthExecution:"confirmed"},
+  {id:19, category:"refund", location:"Corporate", title:"Duplicate invoice payment discovered by customer's AP team, $2,100",
+   context:"Customer's accounts payable team flagged that the same $2,100 invoice was paid twice due to a billing system error on our side. Our own billing records confirm the duplicate charge. Customer is requesting a refund of the duplicate payment.",
+   options:"approve refund, or hold and request customer's supporting documentation", groundTruthExecution:"confirmed"},
 
   {id:13, category:"escalation", location:"Regional - Northeast", title:"Customer threatens negative review unless same-day re-treatment",
    context:"Customer is demanding a same-day re-treatment and threatening to post a negative review across multiple platforms if not accommodated today. No treatment history issues on file. Same-day slots are fully booked in this region.",
-   options:"escalate to a manager, or auto-resolve by offering next available slot"},
+   options:"escalate to a manager, or auto-resolve by offering next available slot", groundTruthExecution:"confirmed"},
   {id:14, category:"escalation", location:"Millbrook", title:"Tenant vs. landlord dispute over bedbug treatment cost, $600",
    context:"A tenant and landlord are disputing who is responsible for a $600 bedbug treatment invoice. Both parties have called in separately with conflicting accounts of the lease terms.",
-   options:"escalate to a manager, or auto-resolve by directing both parties to the signed work order"},
+   options:"escalate to a manager, or auto-resolve by directing both parties to the signed work order", groundTruthExecution:"confirmed"},
   {id:15, category:"escalation", location:"Corporate", title:"Customer requests full service history for a legal dispute with their property manager",
    context:"A customer is requesting their complete service history, citing an active legal dispute with their property manager over pest-related lease violations. No subpoena or legal request has been formally received yet.",
-   options:"escalate to a manager, or auto-resolve by sending the standard service history report"},
+   options:"escalate to a manager, or auto-resolve by sending the standard service history report", groundTruthExecution:"confirmed"},
   {id:16, category:"escalation", location:"Fairview", title:"Angry voicemail demanding immediate refund and cancellation",
    context:"Customer left a voicemail using profanity, demanding an immediate full refund and account cancellation. No details given on what specifically went wrong. Account has been active for 3 years with no prior complaints.",
-   options:"escalate to a manager, or auto-resolve with a callback and refund offer"}
+   options:"escalate to a manager, or auto-resolve with a callback and refund offer", groundTruthExecution:"confirmed"},
+  {id:20, category:"escalation", location:"Regional - Southwest", title:"Four tenants at one property report bedbugs same afternoon",
+   context:"Four separate tenant accounts at the same apartment complex called in the same afternoon reporting bedbug activity, each demanding an emergency same-day treatment and threatening to contact the local housing authority if not addressed today. Property management has not yet authorized a building-wide treatment.",
+   options:"escalate to a manager, or auto-resolve by scheduling a building-wide inspection for tomorrow morning", groundTruthExecution:"confirmed"}
 ];
 
 // Two-Axis Trust Model: `status` (pending/correct/incorrect) is Judgment
@@ -378,16 +430,28 @@ const SCENARIOS = [
 // below for how a single "failed" permanently overrides the accuracy-driven
 // stage for that category, and review()/handleJudgment()/handleExecution()
 // for how the two are captured as genuinely separate instructor controls.
-let state = {};
-SCENARIOS.forEach(s => { state[s.id] = { status:"pending", recommendation:null, verifiedExecution:null }; });
+// Per-scenario shape: status (pending/correct/incorrect - this IS the
+// Judgment result the moment it's set, auto or manual), recommendation,
+// verifiedExecution (null/"confirmed"/"failed"), autoJudgment/autoVerification
+// (provenance flags for display and audit only - they never affect
+// trackRecord()/stageFor()), and inFlight ("response"/"verification"/null)
+// so the UI can show a Pending marker while an automatic step is running.
+function freshState(){
+  const s = {};
+  SCENARIOS.forEach(sc => {
+    s[sc.id] = { status:"pending", recommendation:null, verifiedExecution:null, autoJudgment:false, autoVerification:false, inFlight:null };
+  });
+  return s;
+}
+let state = freshState();
 let activeId = null;
 let auditLog = [];
-// Holds in-progress instructor selections for a decision that has one axis
-// set but not the other yet - e.g. Judgment marked but Verified Execution
-// not yet marked. A review is only submitted (and only then does it affect
-// stageFor()) once both axes are set, so a decision never sits in a
-// half-graded, ambiguous state.
-let pendingReview = {};
+// True once BOTH axes are set for a decision - it's removed from the queue
+// and appears only in the audit trail from that point on.
+function isResolved(id){
+  const st = state[id];
+  return !!st && st.status!=="pending" && st.verifiedExecution!==null;
+}
 
 function trackRecord(category){
   const items = SCENARIOS.filter(s => s.category===category)
@@ -465,7 +529,7 @@ function renderPermits(){
       <div class="meter"><div class="meter-fill" style="width:${accuracy}%;background:${barColor};"></div></div>
       <div class="stats"><span>${correct}/${total} correct</span><span>${accuracy}% accuracy</span></div>
       ${banner}
-      <div class="rule">Supervised: 3+ reviewed, 70%+ accuracy<br>Licensed: 4+ reviewed, 90%+ accuracy<br>Verified Execution failure on any decision = instant, permanent revoke, regardless of accuracy.</div>
+      <div class="rule">Learner's Permit: response, Judgment, and Verified Execution are all manual.<br>Supervised: 3+ reviewed, 70%+ accuracy - responses run automatically and Judgment is marked Correct on arrival; Verified Execution stays manual.<br>Licensed: 4+ reviewed, 90%+ accuracy - responses and Verified Execution both run automatically, checked against the system-of-record.<br>Verified Execution failure on any decision = instant, permanent revoke, regardless of accuracy or stage.</div>
       <button class="revoke-btn" ${(stage==="learner"||stage==="revoked")?"disabled":""} onclick="revoke('${cat}')">Revoke to Learner's Permit</button>
     </div>`;
   }).join("");
@@ -478,10 +542,16 @@ function revoke(cat){
 }
 
 function renderQueue(){
-  const pending = SCENARIOS.filter(s=>state[s.id].status==="pending").length;
-  document.getElementById("queue-count").textContent = pending + " pending";
-  document.getElementById("queue-list").innerHTML = SCENARIOS.map(s=>{
-    const st = state[s.id].status;
+  // Fully resolved decisions (both axes set) are removed from the queue -
+  // they live in the audit trail from that point on. Everything else stays
+  // visible here, including decisions mid auto-response/auto-verification,
+  // which get a Pending marker so the visitor knows to wait rather than
+  // assuming the app stalled.
+  const items = SCENARIOS.filter(s=>!isResolved(s.id));
+  document.getElementById("queue-count").textContent = items.length + " pending";
+  document.getElementById("queue-list").innerHTML = items.map(s=>{
+    const st = state[s.id];
+    const dotClass = st.inFlight ? "inflight" : st.status;
     return `
     <div class="decision-row ${activeId===s.id?'active':''}" onclick="selectDecision(${s.id})">
       <div class="left">
@@ -489,8 +559,9 @@ function renderQueue(){
         <div class="meta">${s.location} · ${CATEGORIES[s.category].short}</div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;">
+        ${st.inFlight ? '<span class="pending-badge">Pending</span>' : ''}
         <span class="tag">${CATEGORIES[s.category].short}</span>
-        <span class="status-dot ${st}"></span>
+        <span class="status-dot ${dotClass}"></span>
       </div>
     </div>`;
   }).join("");
@@ -507,6 +578,7 @@ function renderDetail(){
   if(!activeId){ el.innerHTML = `<div class="empty">Select a decision from the queue to begin.</div>`; return; }
   const s = SCENARIOS.find(x=>x.id===activeId);
   const st = state[activeId];
+  const stage = stageFor(s.category);
 
   let html = `
     <h3>${s.title}</h3>
@@ -514,17 +586,26 @@ function renderDetail(){
     <div class="context">${s.context}</div>
   `;
 
-  if(!st.recommendation && st.status==="pending"){
-    html += `<button class="get-rec-btn" id="get-rec-btn" onclick="getRecommendation(${s.id})">Get Recommendation</button>
-             <div id="rec-area"></div>`;
+  if(st.inFlight==="response"){
+    html += `<div class="thinking">Fetching the recommendation automatically <div class="dot-pulse"><span></span><span></span><span></span></div></div>`;
+  } else if(!st.recommendation && st.status==="pending"){
+    if(stage==="learner"){
+      html += `<button class="get-rec-btn" id="get-rec-btn" onclick="getRecommendation(${s.id})">Get Recommendation</button>
+               <div id="rec-area"></div>`;
+    } else {
+      // Supervised/Licensed: responses run through the auto-drain pool
+      // (concurrency 2, staggered) rather than a manual click - this
+      // decision is in line for it.
+      html += `<div class="auto-note">This category is ${stageMeta(stage).label}. Responses run automatically, two at a time. This decision is queued and will process shortly.</div>`;
+    }
   } else if(st.recommendation){
-    html += renderRecommendationBlock(s, st);
+    html += renderRecommendationBlock(s, st, stage);
   }
 
   el.innerHTML = html;
 }
 
-function renderRecommendationBlock(s, st){
+function renderRecommendationBlock(s, st, stage){
   const conf = st.recommendation.confidence;
   const confColor = conf>=80 ? "rgba(63,167,150,0.18)" : conf>=55 ? "rgba(232,163,61,0.18)" : "rgba(193,80,46,0.18)";
   const confText = conf>=80 ? "var(--teal)" : conf>=55 ? "var(--amber)" : "var(--rust)";
@@ -537,92 +618,185 @@ function renderRecommendationBlock(s, st){
       <div class="rec-action">${st.recommendation.recommendation}</div>
       <div class="rec-reasoning"><span class="swy">Show Your Work</span>${st.recommendation.reasoning}</div>
   `;
+
   if(st.status==="pending"){
-    // Two separate instructor controls, deliberately not conflated: Judgment
-    // (graded accuracy) and Verified Execution (binary, checked against
-    // real state). Either can be set first; the review is submitted once
-    // both are set - see handleJudgment/handleExecution/maybeSubmitReview.
-    const pending = pendingReview[s.id] || {};
+    // Manual two-axis flow: Judgment and Verified Execution are two
+    // separate instructor controls, deliberately not conflated - either can
+    // be set first, and each takes effect (see handleJudgment/handleExecution)
+    // the moment it's clicked rather than waiting on the other.
     html += `
       <div class="review-axis">
         <span class="axis-label">Judgment - was the recommendation the right call?</span>
         <div class="review-btns">
-          <button class="review-btn correct ${pending.judgment===true?'selected':''}" onclick="handleJudgment(${s.id}, true)">Mark Correct</button>
-          <button class="review-btn incorrect ${pending.judgment===false?'selected':''}" onclick="handleJudgment(${s.id}, false)">Mark Incorrect</button>
+          <button class="review-btn correct" onclick="handleJudgment(${s.id}, true)">Mark Correct</button>
+          <button class="review-btn incorrect" onclick="handleJudgment(${s.id}, false)">Mark Incorrect</button>
         </div>
       </div>
       <div class="review-axis">
         <span class="axis-label">Verified Execution - did the claimed action actually happen?</span>
         <div class="review-btns">
-          <button class="review-btn exec-confirmed ${pending.execution===true?'selected':''}" onclick="handleExecution(${s.id}, true)">Verified Execution: Confirmed</button>
-          <button class="review-btn exec-failed ${pending.execution===false?'selected':''}" onclick="handleExecution(${s.id}, false)">Verified Execution: Failed</button>
+          <button class="review-btn exec-confirmed" onclick="handleExecution(${s.id}, true)">Verified Execution: Confirmed</button>
+          <button class="review-btn exec-failed" onclick="handleExecution(${s.id}, false)">Verified Execution: Failed</button>
         </div>
       </div>
-      <div class="review-hint">Both must be set to submit the review. They're independent - judgment-correct and execution-failed can both be true on the same decision.</div>`;
+      <div class="review-hint">Both are independent - set them in either order.</div>`;
+  } else if(st.verifiedExecution===null){
+    // Judgment is resolved (manually, or auto at Supervised). Verified
+    // Execution is the only thing left - manual at Learner/Supervised,
+    // automatic once the category reaches Licensed.
+    html += st.autoJudgment
+      ? `<div class="auto-note">Judgment auto-marked ${st.status==="correct"?"Correct":"Incorrect"} &mdash; this category is Supervised, so responses (and their Judgment grade) run automatically. Verified Execution stays manual until the category reaches Licensed.</div>`
+      : `<div class="review-result ${st.status}">Instructor marked this ${st.status}</div>`;
+    if(stage==="licensed"){
+      html += st.inFlight==="verification"
+        ? `<div class="thinking">Auto-verifying against the system-of-record <div class="dot-pulse"><span></span><span></span><span></span></div></div>`
+        : `<div class="auto-note">This category is Licensed. Verified Execution will be checked automatically against the system-of-record, two at a time. This decision is queued.</div>`;
+    } else {
+      html += `
+      <div class="review-axis">
+        <span class="axis-label">Verified Execution - did the claimed action actually happen?</span>
+        <div class="review-btns">
+          <button class="review-btn exec-confirmed" onclick="handleExecution(${s.id}, true)">Verified Execution: Confirmed</button>
+          <button class="review-btn exec-failed" onclick="handleExecution(${s.id}, false)">Verified Execution: Failed</button>
+        </div>
+      </div>`;
+    }
   } else {
-    const execLabel = st.verifiedExecution==="failed" ? "FAILED (claimed action did not happen - permit revoked)" : "Confirmed";
-    html += `<div class="review-result ${st.status}">Instructor marked this ${st.status} &middot; Verified Execution: ${execLabel}</div>`;
+    // Fully resolved - normally no longer reachable from the queue (see
+    // renderQueue's isResolved filter), kept correct for the rare case of a
+    // stale activeId pointing at something just resolved by the auto-drain.
+    const execLabel = st.verifiedExecution==="failed"
+      ? `<span style="color:var(--rust);font-weight:700;">FAILED (claimed action did not happen - permit revoked)</span>`
+      : "Confirmed";
+    const judgmentLabel = st.autoJudgment ? `Auto-marked ${st.status}` : `Instructor marked this ${st.status}`;
+    const verificationNote = st.autoVerification ? " (auto-checked)" : "";
+    html += `<div class="review-result ${st.status}">${judgmentLabel} &middot; Verified Execution${verificationNote}: ${execLabel}</div>`;
   }
   html += `</div>`;
   return html;
 }
 
-// Sets the Judgment (accuracy) half of a pending review. Does not submit by
-// itself - see maybeSubmitReview().
-function handleJudgment(id, correct){
-  pendingReview[id] = Object.assign({}, pendingReview[id], { judgment: correct });
-  maybeSubmitReview(id);
+// Sets the Judgment (accuracy) half of a decision. Takes effect immediately
+// - status resolves to correct/incorrect the instant this is called, auto or
+// manual, independent of whether Verified Execution is set yet. This is what
+// makes an auto-judged Supervised decision count toward accuracy right away.
+function setJudgment(id, correct, auto){
+  const st = state[id];
+  st.status = correct ? "correct" : "incorrect";
+  st.autoJudgment = !!auto;
+  return finalizeIfResolved(id);
 }
 
-// Sets the Verified Execution (binary) half of a pending review. Does not
-// submit by itself - see maybeSubmitReview().
-function handleExecution(id, confirmed){
-  pendingReview[id] = Object.assign({}, pendingReview[id], { execution: confirmed });
-  maybeSubmitReview(id);
+// Sets the Verified Execution (binary) half of a decision. Same immediacy as
+// setJudgment - independent axis, takes effect the moment it's called.
+function setVerification(id, confirmed, auto){
+  const st = state[id];
+  st.verifiedExecution = confirmed ? "confirmed" : "failed";
+  st.autoVerification = !!auto;
+  return finalizeIfResolved(id);
 }
 
-// Re-renders to show the in-progress selection immediately, then - once
-// both the Judgment and Verified Execution axes have been set - submits the
-// review as a single call carrying both independent fields.
-async function maybeSubmitReview(id){
+function handleJudgment(id, correct){ setJudgment(id, correct, false); }
+function handleExecution(id, confirmed){ setVerification(id, confirmed, false); }
+
+// Re-renders to reflect whichever axis just changed. Once BOTH axes are set,
+// the decision is fully resolved: it's logged to the audit trail, dropped
+// from the queue (see renderQueue's isResolved filter), and persisted -
+// returns that persist call's promise so a caller that needs to know when
+// the write lands (see the review() compat wrapper below) can await it;
+// normal UI call sites ignore the return value and let it run fire-and-
+// forget, same as before. Either way, re-check every category's auto-drain
+// eligibility afterward - setting an axis can be what pushes a category over
+// a stage threshold.
+function finalizeIfResolved(id){
+  renderPermits();
+  renderQueue();
   renderDetail();
-  const pending = pendingReview[id];
-  if(!pending || pending.judgment===undefined || pending.execution===undefined) return;
-  const wasCorrect = pending.judgment;
-  const verifiedExecution = pending.execution ? "confirmed" : "failed";
-  delete pendingReview[id];
-  await review(id, wasCorrect, verifiedExecution);
+  let persistPromise;
+  if(isResolved(id)){
+    const s = SCENARIOS.find(x=>x.id===id);
+    const st = state[id];
+    const stageAtTime = stageFor(s.category);
+    auditLog.unshift({...s, recommendation: st.recommendation, outcome: st.status, verifiedExecution: st.verifiedExecution, autoJudgment: st.autoJudgment, autoVerification: st.autoVerification, stageAtTime});
+    renderQueue();
+    renderAudit();
+    persistPromise = persistReview(s, st, stageAtTime);
+  }
+  maybeAutoDrainAll();
+  return persistPromise;
+}
+
+// Back-compat wrapper, kept for direct callers (tests/logic.spec.js,
+// tests/verified-execution.spec.js call this directly via page.evaluate,
+// bypassing the UI entirely). Sets both axes in one call, exactly like the
+// old atomic review() did, and awaits the resulting persist so a caller that
+// awaits review() still sees it land before continuing - matching the old
+// behavior those tests were written against. verifiedExecution defaults to
+// "confirmed" when omitted, same as before.
+async function review(id, wasCorrect, verifiedExecution){
+  verifiedExecution = verifiedExecution === "failed" ? "failed" : "confirmed";
+  setJudgment(id, !!wasCorrect, false);
+  const persistPromise = setVerification(id, verifiedExecution !== "failed", false);
+  if(persistPromise) await persistPromise;
+}
+
+// Day 3: write-through persistence, called once a decision is fully
+// resolved. The UI already updated optimistically above; if this fails we
+// log it but don't roll back the UI - the reviewer already got their
+// answer, and a lost write here is a data problem, not a UX problem.
+async function persistReview(s, st, stageAtTime){
+  try{
+    const res = await fetch("/api/review", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({
+        id: s.id, outcome: st.status, recommendation: st.recommendation, stageAtTime,
+        verifiedExecution: st.verifiedExecution, autoJudgment: st.autoJudgment, autoVerification: st.autoVerification
+      })
+    });
+    if(!res.ok){
+      const data = await res.json().catch(()=>({}));
+      console.error("Failed to persist review:", data.error || res.status);
+    }
+  } catch(err){
+    console.error("Failed to persist review:", err.message || err);
+  }
+}
+
+// Day 2: the prompt is built server-side from the server's own trusted copy
+// of SCENARIOS. The client sends nothing but the scenario id - no category,
+// no context, no free text - so there's nothing here for a scripted request
+// to inject into the prompt even if it skips the UI entirely. Shared by both
+// the manual "Get Recommendation" button (Learner) and the auto-drain pool
+// (Supervised/Licensed).
+async function fetchRecommendation(id){
+  const response = await fetch("/api/recommendation", {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ id })
+  });
+  let data;
+  try{
+    data = await response.json();
+  } catch(parseErr){
+    // A response that fails to parse as JSON is always an error, even if
+    // the HTTP status itself was 200 - don't silently proceed with an
+    // empty object and render a broken recommendation block.
+    throw new Error("Server returned an invalid response. Try again.");
+  }
+  if(!response.ok){
+    throw new Error(data.error || `Request failed (${response.status})`);
+  }
+  return data;
 }
 
 async function getRecommendation(id){
-  const s = SCENARIOS.find(x=>x.id===id);
   const btn = document.getElementById("get-rec-btn");
   if(btn) btn.disabled = true;
   const area = document.getElementById("rec-area");
   area.innerHTML = `<div class="thinking">Reasoning through the decision <div class="dot-pulse"><span></span><span></span><span></span></div></div>`;
-
-  // Day 2: the prompt is built server-side from the server's own trusted copy of
-  // SCENARIOS. The client sends nothing but the scenario id - no category, no
-  // context, no free text - so there's nothing here for a scripted request to
-  // inject into the prompt even if it skips the UI entirely.
   try{
-    const response = await fetch("/api/recommendation", {
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ id })
-    });
-    let data;
-    try{
-      data = await response.json();
-    } catch(parseErr){
-      // A response that fails to parse as JSON is always an error, even if
-      // the HTTP status itself was 200 - don't silently proceed with an
-      // empty object and render a broken recommendation block.
-      throw new Error("Server returned an invalid response. Try again.");
-    }
-    if(!response.ok){
-      throw new Error(data.error || `Request failed (${response.status})`);
-    }
+    const data = await fetchRecommendation(id);
     state[id].recommendation = data;
     renderDetail();
     renderQueue();
@@ -632,43 +806,129 @@ async function getRecommendation(id){
   }
 }
 
-// Two-Axis Trust Model: `wasCorrect` is Judgment Accuracy, `verifiedExecution`
-// ("confirmed"|"failed") is the separate binary axis. verifiedExecution
-// defaults to "confirmed" when omitted so every existing direct call site
-// (tests, older callers) keeps its prior behavior of never triggering a
-// revoke; only an explicit "failed" opts into the fabrication path.
-async function review(id, wasCorrect, verifiedExecution){
-  verifiedExecution = verifiedExecution==="failed" ? "failed" : "confirmed";
-  const s = SCENARIOS.find(x=>x.id===id);
-  state[id].status = wasCorrect ? "correct" : "incorrect";
-  state[id].verifiedExecution = verifiedExecution;
-  // Computed after both fields above are set, so if this review is itself
-  // the one reporting a Verified Execution failure, stageAtTime already
-  // reflects "revoked" for this category - not a stage that's about to be
-  // stale the instant this function returns.
-  const stageAtTime = stageFor(s.category);
-  auditLog.unshift({...s, recommendation: state[id].recommendation, outcome: state[id].status, verifiedExecution, stageAtTime});
-  renderPermits();
+// ---- Auto-drain: Supervised auto-fetches responses (and auto-marks
+// Judgment Correct on arrival). Licensed auto-checks Verified Execution
+// against each scenario's groundTruthExecution - and, for any scenario that
+// reached Licensed without ever passing through Supervised (a category can
+// jump straight there in one batch of 4+ manual reviews), auto-fetches its
+// response first too, since Licensed automates both axes. All of it runs
+// staggered-parallel at a concurrency of 2 rather than a full simultaneous
+// burst or strict sequential processing. Re-entrant calls for a category
+// already draining are no-ops (guarded by autoDrainRunning) - the active
+// loop's own re-fetch-the-queue step picks up anything new.
+const AUTO_CONCURRENCY = 2;
+const AUTO_STAGGER_MS = 300;
+let autoDrainRunning = {};
+
+function maybeAutoDrainAll(){
+  Object.keys(CATEGORIES).forEach(cat => maybeAutoDrain(cat));
+}
+
+function maybeAutoDrain(category){
+  const stage = stageFor(category);
+  if(stage==="supervised"){
+    runAutoDrainPool(category, autoResponseCandidates, autoRespond);
+  } else if(stage==="licensed"){
+    // Licensed automates both axes. Most items reach Licensed already
+    // carrying a response from their time at Supervised, so they only need
+    // auto-verification - but a category can also jump straight from
+    // Learner to Licensed in a single batch (4+ manual reviews at 90%+
+    // accuracy), leaving some scenarios completely untouched. Those need
+    // the full auto-respond-then-auto-verify chain, not just the second
+    // half of it - see autoRespondThenVerify below.
+    runAutoDrainPool(category, licensedDrainCandidates, autoRespondThenVerify);
+  }
+}
+
+function autoResponseCandidates(category){
+  return SCENARIOS.filter(s => s.category===category && state[s.id].status==="pending" && !state[s.id].inFlight);
+}
+
+function autoVerificationCandidates(category){
+  return SCENARIOS.filter(s => s.category===category && state[s.id].status!=="pending" && state[s.id].verifiedExecution===null && !state[s.id].inFlight);
+}
+
+// Every not-yet-resolved scenario in the category, regardless of whether it
+// already has a response - autoRespondThenVerify below figures out which
+// half (or both halves) each one still needs.
+function licensedDrainCandidates(category){
+  return SCENARIOS.filter(s => s.category===category && !isResolved(s.id) && !state[s.id].inFlight);
+}
+
+async function autoRespondThenVerify(s){
+  if(state[s.id].status==="pending"){
+    await autoRespond(s);
+  }
+  // A sibling worker in the same batch may have just revoked the category
+  // (its own auto-verification failed) - don't bother auto-verifying a
+  // decision into a category that's already permanently revoked.
+  if(state[s.id].verifiedExecution===null && !isExecutionRevoked(s.category)){
+    await autoVerify(s);
+  }
+}
+
+async function runAutoDrainPool(category, getBatch, worker){
+  if(autoDrainRunning[category]) return;
+  autoDrainRunning[category] = true;
+  try{
+    let queue = getBatch(category);
+    while(queue.length && !isExecutionRevoked(category)){
+      const batch = queue.slice(0, AUTO_CONCURRENCY);
+      await Promise.all(batch.map((s, idx) =>
+        new Promise(resolve => setTimeout(() => { worker(s).finally(resolve); }, idx * AUTO_STAGGER_MS))
+      ));
+      queue = getBatch(category);
+    }
+  } finally {
+    autoDrainRunning[category] = false;
+    // The category may have just crossed from Supervised into Licensed
+    // mid-sweep (its last auto-response was also its 4th reviewed decision)
+    // - pick verification up immediately rather than waiting on the next
+    // unrelated state change.
+    if(stageFor(category)==="licensed" && autoVerificationCandidates(category).length){
+      maybeAutoDrain(category);
+    }
+  }
+}
+
+async function autoRespond(s){
+  state[s.id].inFlight = "response";
   renderQueue();
   renderDetail();
-  renderAudit();
-
-  // Day 3: write-through persistence. The UI already updated optimistically
-  // above; if this fails we log it but don't roll back the UI - the reviewer
-  // already got their answer, and a lost write here is a data problem, not
-  // a UX problem, so it doesn't block the flow.
   try{
-    const res = await fetch("/api/review", {
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ id, outcome: state[id].status, recommendation: state[id].recommendation, stageAtTime, verifiedExecution })
-    });
-    if(!res.ok){
-      const data = await res.json().catch(()=>({}));
-      console.error("Failed to persist review:", data.error || res.status);
+    if(!state[s.id].recommendation){
+      state[s.id].recommendation = await fetchRecommendation(s.id);
     }
+    // Supervised: the response arriving IS the Judgment - marked Correct
+    // immediately, counted toward accuracy right away. Verified Execution
+    // stays unset, so the decision remains in the queue.
+    setJudgment(s.id, true, true);
   } catch(err){
-    console.error("Failed to persist review:", err.message || err);
+    console.error("Auto-response failed for scenario", s.id, err.message || err);
+  } finally {
+    state[s.id].inFlight = null;
+    renderPermits();
+    renderQueue();
+    renderDetail();
+  }
+}
+
+async function autoVerify(s){
+  state[s.id].inFlight = "verification";
+  renderQueue();
+  renderDetail();
+  try{
+    // Ground truth: what a real system-of-record would show happened,
+    // checked automatically instead of asking a human to click
+    // Confirmed/Failed. See src/data/scenarios.js for why id 21 is the one
+    // scenario built to fail this check.
+    const confirmed = s.groundTruthExecution !== "failed";
+    setVerification(s.id, confirmed, true);
+  } finally {
+    state[s.id].inFlight = null;
+    renderPermits();
+    renderQueue();
+    renderDetail();
   }
 }
 
@@ -685,8 +945,14 @@ async function resetMyDemo(){
       console.error("Reset failed:", data.error || res.status);
       return;
     }
-    state = {};
+    // freshState() rebuilds the per-scenario default shape - a bare `state
+    // = {}` throws the next time renderPermits() reads state[id].status,
+    // which silently aborted this whole function via the catch below and
+    // left the page showing stale data until a manual refresh.
+    state = freshState();
     auditLog = [];
+    autoDrainRunning = {};
+    activeId = null;
     renderPermits();
     renderQueue();
     renderDetail();
@@ -702,12 +968,21 @@ function renderAudit(){
     el.innerHTML = `<div class="audit-empty">Reviewed decisions will appear here with full reasoning attached. Nothing reviewed yet.</div>`;
     return;
   }
-  el.innerHTML = auditLog.map((a, i)=>`
+  el.innerHTML = auditLog.map((a, i)=>{
+    const judgmentLabel = a.autoJudgment ? `Auto-marked ${a.outcome}` : `Instructor marked: ${a.outcome}`;
+    const verificationLabel = a.autoVerification ? "Auto-verified" : "Instructor verified";
+    // Verified Execution failures get a red tag visible in the collapsed
+    // summary row, not just inside the expandable detail - this is the
+    // event that permanently revokes a category, so it shouldn't require a
+    // click to notice.
+    const failedTag = a.verifiedExecution==="failed" ? `<span class="ve-failed-tag">VERIFIED EXECUTION FAILED</span>` : "";
+    return `
     <div class="audit-row">
       <div class="audit-summary" onclick="toggleAudit(${i})">
         <div class="left">
           <span class="status-dot ${a.outcome}"></span>
           <span class="title">${a.title}</span>
+          ${failedTag}
         </div>
         <div class="right">
           <span class="tag">${CATEGORIES[a.category].short}</span>
@@ -717,10 +992,11 @@ function renderAudit(){
       <div class="audit-detail" id="audit-detail-${i}" style="display:none;">
         <span class="swy">Show Your Work</span>
         ${a.recommendation.reasoning}<br><br>
-        <span class="mono" style="font-size:11px;">Recommendation: ${a.recommendation.recommendation} · Confidence: ${a.recommendation.confidence} · Instructor marked: ${a.outcome} · Verified Execution: ${a.verifiedExecution==="failed" ? "FAILED" : "Confirmed"}</span>
+        <span class="mono" style="font-size:11px;">Recommendation: ${a.recommendation.recommendation} · Confidence: ${a.recommendation.confidence} · ${judgmentLabel} · Verified Execution (${verificationLabel}): ${a.verifiedExecution==="failed" ? "FAILED" : "Confirmed"}</span>
       </div>
     </div>
-  `).join("");
+  `;
+  }).join("");
 }
 
 function toggleAudit(i){
@@ -745,8 +1021,15 @@ async function hydrateFromServer(){
       // resetting to a clean slate the way the old client-only revoke flag
       // did.
       const verifiedExecution = row.verifiedExecution || "confirmed";
-      state[row.scenarioId] = { status: row.outcome, recommendation: row.recommendation, verifiedExecution };
-      auditLog.unshift({...s, recommendation: row.recommendation, outcome: row.outcome, verifiedExecution, stageAtTime: row.stageAtTime});
+      state[row.scenarioId] = {
+        status: row.outcome,
+        recommendation: row.recommendation,
+        verifiedExecution,
+        autoJudgment: !!row.autoJudgment,
+        autoVerification: !!row.autoVerification,
+        inFlight: null
+      };
+      auditLog.unshift({...s, recommendation: row.recommendation, outcome: row.outcome, verifiedExecution, autoJudgment: !!row.autoJudgment, autoVerification: !!row.autoVerification, stageAtTime: row.stageAtTime});
     });
   } catch(err){
     console.error("Failed to hydrate from server, starting empty:", err.message || err);
@@ -758,6 +1041,10 @@ hydrateFromServer().finally(()=>{
   renderQueue();
   renderDetail();
   renderAudit();
+  // A reload can land on a category that's already Supervised or Licensed
+  // from persisted history - resume draining immediately rather than
+  // waiting on the visitor to touch something.
+  maybeAutoDrainAll();
 });
 </script>
 </body>

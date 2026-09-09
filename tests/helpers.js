@@ -26,4 +26,39 @@ async function resetState(page) {
   await page.reload();
 }
 
-module.exports = { resetState };
+// TestPlan v4 (3-tier automation model): Supervised and Licensed both fetch
+// POST /api/recommendation in the background via the app's own auto-drain
+// pool the moment a category crosses into either stage - not just on a
+// manual "Get Recommendation" click anymore. Route mocking has to account
+// for that everywhere, not just in tests that click the button.
+//
+// Call this BEFORE resetState() in a test's setup - page.route() persists
+// across the goto()/reload() resetState() does, but only if it was
+// registered before that navigation happens.
+
+// Mocks POST /api/recommendation with an immediate, canned response - use
+// for tests that want the real fetch flow (a manual "Get Recommendation"
+// click, or the auto-drain pool actually completing) to resolve
+// deterministically and instantly instead of hitting the real Anthropic API.
+async function mockRecommendation(page, overrides = {}) {
+  const body = Object.assign(
+    { recommendation: "Dispatch tonight.", reasoning: "Because the situation warrants it.", confidence: 90 },
+    overrides
+  );
+  await page.route("**/api/recommendation", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
+  );
+}
+
+// Blocks POST /api/recommendation so it never resolves - use for tests that
+// drive state directly (via review()/setJudgment()/setVerification(), the
+// pattern most of this suite uses) and don't want the auto-drain pool's
+// background fetches racing their assertions. A category that crosses into
+// Supervised or Licensed during one of these tests will still try to
+// auto-drain its remaining scenarios, but the fetch just hangs forever, so
+// those scenarios stay untouched and the test's own math stays exact.
+async function blockRecommendation(page) {
+  await page.route("**/api/recommendation", () => new Promise(() => {}));
+}
+
+module.exports = { resetState, mockRecommendation, blockRecommendation };

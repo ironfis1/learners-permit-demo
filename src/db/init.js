@@ -46,11 +46,33 @@ ALTER TABLE decisions_log
   ADD COLUMN IF NOT EXISTS session_id TEXT NOT NULL DEFAULT '';
 `;
 
+// Staged-autonomy gap fix, v2: stage (learner/supervised/licensed) used to be
+// a pure scorecard label - every decision got the identical two-axis review
+// regardless of stage, so "Licensed" never actually changed anything. These
+// two columns mark whether EACH axis was set automatically rather than by a
+// human, tracked separately since the two axes now automate at different
+// stages: auto_judgment true means the response was auto-fetched and
+// auto-marked Correct the moment it arrived (Supervised or later - see
+// autoRespond() in public/index.html), auto_verification true means Verified
+// Execution was checked against the scenario's groundTruthExecution instead
+// of a human click (Licensed or later - see autoVerify()). Neither flag
+// changes what outcome/verified_execution mean or how they're scored - see
+// trackRecord()/isExecutionRevoked() in public/index.html, which read the
+// same status/verified_execution values regardless of provenance. Default
+// false so existing rows (all human-judged, from before this pivot) aren't
+// retroactively reclassified.
+const ADD_AUTO_PROVENANCE_COLUMNS_SQL = `
+ALTER TABLE decisions_log
+  ADD COLUMN IF NOT EXISTS auto_judgment BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS auto_verification BOOLEAN NOT NULL DEFAULT false;
+`;
+
 async function initDb() {
   await query(CREATE_TABLE_SQL);
   await query(ADD_VERIFIED_EXECUTION_COLUMN_SQL);
   await query(ADD_SESSION_ID_COLUMN_SQL);
-  console.log("decisions_log table ready (with verified_execution, session_id columns).");
+  await query(ADD_AUTO_PROVENANCE_COLUMNS_SQL);
+  console.log("decisions_log table ready (with verified_execution, session_id, auto_judgment, auto_verification columns).");
 }
 
 module.exports = { initDb };

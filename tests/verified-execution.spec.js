@@ -7,10 +7,20 @@
 // functions (review, stageFor, trackRecord) and against real persisted
 // state via GET /api/state / POST /api/reset, per the pattern already
 // established in tests/logic.spec.js.
+//
+// Updated for the 3-tier automation model: /api/recommendation is blocked
+// by default in this file (see tests/helpers.js's blockRecommendation) so
+// the background auto-drain pool a Supervised/Licensed transition now
+// triggers doesn't race these tests' direct state manipulation - most of
+// them build a category's record by hand via review() and check the exact
+// resulting accuracy/stage math. The one exception is the "review UI
+// controls" describe block at the bottom, which needs the fetch to actually
+// resolve.
 const { test, expect } = require("@playwright/test");
-const { resetState } = require("./helpers");
+const { resetState, mockRecommendation, blockRecommendation } = require("./helpers");
 
 test.beforeEach(async ({ page }) => {
+  await blockRecommendation(page);
   await resetState(page);
 });
 
@@ -157,14 +167,14 @@ test.describe("Verified Execution - instant, permanent, binary revoke", () => {
 });
 
 test.describe("Verified Execution - review UI controls", () => {
-  test("VE5: the review panel exposes Judgment and Verified Execution as two independent controls, and only submits once both are set", async ({ page }) => {
-    await page.route("**/api/recommendation", (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ recommendation: "Dispatch tonight.", reasoning: "Because.", confidence: 90 }),
-      })
-    );
+  test.beforeEach(async ({ page }) => {
+    // This block clicks through the real UI and needs the fetch to
+    // actually resolve, unlike the rest of this file.
+    await page.unroute("**/api/recommendation");
+    await mockRecommendation(page, { recommendation: "Dispatch tonight.", reasoning: "Because.", confidence: 90 });
+  });
+
+  test("VE5: the review panel exposes Judgment and Verified Execution as two independent controls, each taking effect the moment it's set", async ({ page }) => {
     await page.evaluate((id) => selectDecision(id), 1);
     await page.locator("#get-rec-btn").click();
 
@@ -172,14 +182,21 @@ test.describe("Verified Execution - review UI controls", () => {
     await expect(page.locator(".review-btn.correct")).toBeVisible();
     await expect(page.locator(".review-btn.exec-failed")).toBeVisible();
 
-    // Setting only Judgment does not submit the review yet.
+    // Setting only Judgment resolves and displays it immediately - the
+    // Judgment buttons are replaced by a result label, and the decision
+    // stays open on Verified Execution alone (not "submitted" as a whole).
     await page.locator(".review-btn.correct").click();
-    await expect(page.locator(".review-result")).toHaveCount(0);
-    await expect(page.locator(".review-btn.correct")).toHaveClass(/selected/);
+    await expect(page.locator(".review-result.correct")).toContainText("Instructor marked this correct");
+    await expect(page.locator(".review-btn.correct")).toHaveCount(0);
+    await expect(page.locator(".review-btn.exec-failed")).toBeVisible();
+    const midState = await page.evaluate(() => ({ status: state[1].status, resolved: isResolved(1) }));
+    expect(midState).toEqual({ status: "correct", resolved: false });
 
-    // Setting Verified Execution too completes the submission.
+    // Setting Verified Execution too fully resolves the decision.
     await page.locator(".review-btn.exec-failed").click();
     await expect(page.locator(".review-result")).toContainText("FAILED");
     await expect(page.locator(".review-result")).toContainText("correct");
+    const resolved = await page.evaluate(() => isResolved(1));
+    expect(resolved).toBe(true);
   });
 });
