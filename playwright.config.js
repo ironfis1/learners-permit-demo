@@ -21,7 +21,10 @@ module.exports = defineConfig({
   testDir: "./tests",
   fullyParallel: false, // shared database state (see resetState in beforeEach) - keep runs serialized to avoid cross-test interference
   workers: 1,
-  retries: process.env.CI ? 1 : 0,
+  // Local runs against an already-deployed instance (LIVE_BASE_URL) hit the
+  // same real network/render timing variance CI's retry exists for - give
+  // them the same one-retry cushion instead of chasing it with timeouts.
+  retries: process.env.CI || process.env.LIVE_BASE_URL ? 1 : 0,
   reporter: process.env.CI ? "github" : "list",
   use: {
     baseURL: BASE_URL,
