@@ -59,8 +59,13 @@ function isExecutionRevoked(category, byScenarioId) {
 
 function stageFor(category, byScenarioId) {
   if (isExecutionRevoked(category, byScenarioId)) return "revoked";
+  // decisions_log only ever gets a row once BOTH axes are resolved (see
+  // persistReview in public/index.html), so trackRecord here is already
+  // the "verified" count the client's stageFor measures Licensed against -
+  // no separate query needed. Threshold matches public/index.html exactly:
+  // 5+ verified decisions at 90%+ accuracy.
   const { total, accuracy } = trackRecord(category, byScenarioId);
-  if (total >= 4 && accuracy >= 90) return "licensed";
+  if (total >= 5 && accuracy >= 90) return "licensed";
   if (total >= 3 && accuracy >= 70) return "supervised";
   return "learner";
 }

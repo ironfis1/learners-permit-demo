@@ -101,9 +101,11 @@ test.describe("Group E - Trust-Building Algorithm (exact sequences)", () => {
     expect(stage).toBe("supervised");
   });
 
-  test("E2: a perfect 4/4 dispatch record reaches Licensed", async ({ page }) => {
+  test("E2: a perfect 5/5 dispatch record (Licensed's full verified threshold) reaches Licensed", async ({ page }) => {
+    // Licensed is measured on verified decisions only, 5+ at 90%+ - dispatch
+    // has exactly 5 scenarios, so all of them need a manual review here.
     const stage = await page.evaluate(async () => {
-      for (const id of [1, 2, 3, 4]) {
+      for (const id of [1, 2, 3, 4, 17]) {
         state[id].recommendation = { recommendation: "x", reasoning: "y", confidence: 80 };
         await review(id, true);
       }

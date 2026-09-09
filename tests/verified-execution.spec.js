@@ -52,9 +52,10 @@ test.describe("Verified Execution - instant, permanent, binary revoke", () => {
 
     expect(result.stageBeforeFailure).toBe("supervised");
     expect(result.stageAfterFailure).toBe("revoked");
-    // The accuracy math underneath is untouched by the revoke - it would
-    // otherwise read as Licensed (4/4, 100%). Verified Execution overrides
-    // it outright rather than averaging into it.
+    // The accuracy math underneath is untouched by the revoke - trackRecord
+    // still reads 4/4, 100%. Verified Execution overrides the stage outright
+    // rather than averaging into it, regardless of where the accuracy math
+    // itself would otherwise land.
     expect(result.trackAfterFailure).toEqual({ total: 4, correct: 4, accuracy: 100 });
   });
 

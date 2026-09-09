@@ -31,6 +31,12 @@
     --teal:#3FA796;
     --rust:#C1502E;
     --slate:#7C8A9E;
+    /* Distinct from --amber on purpose: amber-pulsing means "actively
+       fetching right now" (see .status-dot.inflight); gold-static means
+       "judged, sitting still, waiting on a human to click Verified
+       Execution" (see .status-dot.awaiting-verification). Different color,
+       different animation - the two states should never look the same. */
+    --gold:#E8D93D;
   }
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;}
@@ -180,6 +186,12 @@
   .status-dot.correct{background:var(--teal);}
   .status-dot.incorrect{background:var(--rust);}
   .status-dot.inflight{background:var(--amber);animation:pulse 1.1s infinite ease-in-out;}
+  /* Judgment is resolved (green/red would be misleading here - it hasn't
+     closed yet) but Verified Execution hasn't been set and nothing is
+     actively fetching right now - it's sitting still, waiting on a human
+     to click Confirmed/Failed. Static, not pulsing - pulsing is reserved
+     for .inflight, which means the opposite (actively processing). */
+  .status-dot.awaiting-verification{background:var(--gold);}
   .pending-badge{
     font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:0.05em;text-transform:uppercase;
     color:var(--amber);border:1px solid rgba(232,163,61,0.4);background:rgba(232,163,61,0.1);
@@ -320,8 +332,8 @@
 
       <div class="instructor-note">
         <h3>Instructor Note</h3>
-        <p>Two-Axis Trust Model, set by the instructor, not the agent. Judgment Accuracy is graded and gradual - it drives stage progression: Supervised at 3+ decisions reviewed in a category with 70%+ accuracy, Licensed at 4+ decisions with 90%+ accuracy. Verified Execution is separate and binary - it checks whether a claimed action actually happened. It never averages with accuracy: one Verified Execution failure permanently revokes that category's permit instantly, no matter how high the accuracy score is, with no tolerance and no reinstatement path. See the permit cards.</p>
-        <p style="margin-top:12px;">What the stages actually change: at Learner, every decision is fully manual - a human requests the recommendation, then sets both Judgment (was the call right?) and Verified Execution (did it actually happen?), independently and in either order. At Supervised, the response and its Judgment grade happen automatically the moment a decision is picked up - marked Correct on arrival, counted toward accuracy immediately - and Verified Execution is the only thing a human still sets. At Licensed, Verified Execution goes automatic too, checked against a hidden system-of-record field instead of a person's confirmation. A decision waiting on automatic processing shows a Pending marker in the queue so it's clear the system is mid-check, not stuck. A single automatic Verified Execution failure revokes the permit exactly like a manual one would - with nobody watching when it happens.</p>
+        <p>Two-Axis Trust Model, set by the instructor, not the agent. Judgment Accuracy is graded and gradual - it drives stage progression: Supervised at 3+ decisions reviewed in a category with 70%+ accuracy, Licensed at 5+ decisions with both axes fully resolved (Judgment and Verified Execution) at 90%+ accuracy. That second bar is deliberate: Supervised auto-judges a decision on arrival but never auto-verifies it, so it can never move the Licensed count on its own - a category only reaches Licensed for the first time on the back of a human's own Verified Execution click. Verified Execution is separate and binary - it checks whether a claimed action actually happened. It never averages with accuracy: one Verified Execution failure permanently revokes that category's permit instantly, no matter how high the accuracy score is, with no tolerance and no reinstatement path. See the permit cards.</p>
+        <p style="margin-top:12px;">What the stages actually change: at Learner, every decision is fully manual - a human requests the recommendation, then sets both Judgment (was the call right?) and Verified Execution (did it actually happen?), independently and in either order. At Supervised, the response and its Judgment grade happen automatically the moment a decision is picked up - marked Correct on arrival, counted toward Judgment accuracy immediately - but Verified Execution stays on a human until they click it. At Licensed, the human click that clears the 5th verified decision doesn't just flip the label - it also sweeps anything else left over in that category's queue, judged or not, through the automatic Verified Execution check. A decision waiting on automatic processing shows a Pending marker in the queue so it's clear the system is mid-check, not stuck. A single automatic Verified Execution failure revokes the permit exactly like a manual one would - with nobody watching when it happens.</p>
       </div>
 
       <div class="audit">
@@ -463,6 +475,26 @@ function trackRecord(category){
   return {total, correct, accuracy};
 }
 
+// Same shape as trackRecord, but counts only decisions where BOTH axes are
+// set - Judgment alone (an auto-judged Supervised item sitting at the gold
+// "awaiting verification" dot) does not count. This is what Licensed's
+// threshold is measured against, so a category can only ever reach Licensed
+// for the first time via decisions that were actually verified - by a human
+// clicking, or (once already Licensed) by the automatic autoVerify chain.
+// Supervised's own auto-respond only ever sets Judgment, never Verified
+// Execution, so it can never move this number on its own - closing the exact
+// gap that let a category self-promote to Licensed on auto-judgments alone
+// with no human ever touching it.
+function verifiedTrackRecord(category){
+  const items = SCENARIOS.filter(s => s.category===category)
+    .map(s => state[s.id])
+    .filter(s => s.verifiedExecution!==null);
+  const total = items.length;
+  const correct = items.filter(s => s.status==="correct").length;
+  const accuracy = total ? Math.round((correct/total)*100) : 0;
+  return {total, correct, accuracy};
+}
+
 // Binary, not graded: true the moment any single reviewed decision in this
 // category has verifiedExecution === "failed". No averaging, no threshold,
 // no tolerance - this is the mechanic that was missing before (see the
@@ -486,9 +518,18 @@ function stageFor(category){
   // by the existing Group F/G tests) - distinct from, and layered under,
   // the persisted Verified Execution revoke above.
   if(state["_revoked_"+category]) return "learner";
-  const {total, accuracy} = trackRecord(category);
-  if(total>=4 && accuracy>=90) return "licensed";
-  if(total>=3 && accuracy>=70) return "supervised";
+  // Licensed is measured against verifiedTrackRecord, not trackRecord: only
+  // fully-verified decisions count. Supervised's auto-respond only ever sets
+  // Judgment, so it can never move this number by itself - a category can
+  // only reach Licensed for the first time when a human's own Verified
+  // Execution click is what pushes the verified count past the bar. Once
+  // that happens, maybeAutoDrain's Licensed branch sweeps anything left
+  // over in the category's queue (auto-judged-but-unverified included) via
+  // autoRespondThenVerify - see licensedDrainCandidates below.
+  const {total, accuracy} = verifiedTrackRecord(category);
+  if(total>=5 && accuracy>=90) return "licensed";
+  const judged = trackRecord(category);
+  if(judged.total>=3 && judged.accuracy>=70) return "supervised";
   return "learner";
 }
 
@@ -529,7 +570,7 @@ function renderPermits(){
       <div class="meter"><div class="meter-fill" style="width:${accuracy}%;background:${barColor};"></div></div>
       <div class="stats"><span>${correct}/${total} correct</span><span>${accuracy}% accuracy</span></div>
       ${banner}
-      <div class="rule">Learner's Permit: response, Judgment, and Verified Execution are all manual.<br>Supervised: 3+ reviewed, 70%+ accuracy - responses run automatically and Judgment is marked Correct on arrival; Verified Execution stays manual.<br>Licensed: 4+ reviewed, 90%+ accuracy - responses and Verified Execution both run automatically, checked against the system-of-record.<br>Verified Execution failure on any decision = instant, permanent revoke, regardless of accuracy or stage.</div>
+      <div class="rule">Learner's Permit: response, Judgment, and Verified Execution are all manual.<br>Supervised: 3+ reviewed, 70%+ accuracy - responses run automatically and Judgment is marked Correct on arrival; Verified Execution stays manual.<br>Licensed: 5+ verified, 90%+ accuracy on verified decisions - reached only once a human's own Verified Execution click clears the bar, at which point responses and Verified Execution both run automatically on the rest, checked against the system-of-record.<br>Verified Execution failure on any decision = instant, permanent revoke, regardless of accuracy or stage.</div>
       <button class="revoke-btn" ${(stage==="learner"||stage==="revoked")?"disabled":""} onclick="revoke('${cat}')">Revoke to Learner's Permit</button>
     </div>`;
   }).join("");
@@ -551,7 +592,19 @@ function renderQueue(){
   document.getElementById("queue-count").textContent = items.length + " pending";
   document.getElementById("queue-list").innerHTML = items.map(s=>{
     const st = state[s.id];
-    const dotClass = st.inFlight ? "inflight" : st.status;
+    // Three visually distinct waiting states, on purpose: "pending" (gray,
+    // untouched), "inflight" (amber, pulsing - actively fetching a response
+    // or verification right now), and "awaiting-verification" (gold, static
+    // - Judgment already resolved, sitting still, waiting on a human to
+    // click Confirmed/Failed). A judged-but-unverified item never shows the
+    // plain correct/incorrect color here - that would read as fully closed
+    // when it isn't (see stageFor()'s Licensed gate, which won't advance
+    // the category while any dot is in this state).
+    const dotClass = st.inFlight
+      ? "inflight"
+      : (st.status!=="pending" && st.verifiedExecution===null)
+        ? "awaiting-verification"
+        : st.status;
     return `
     <div class="decision-row ${activeId===s.id?'active':''}" onclick="selectDecision(${s.id})">
       <div class="left">
@@ -809,9 +862,9 @@ async function getRecommendation(id){
 // ---- Auto-drain: Supervised auto-fetches responses (and auto-marks
 // Judgment Correct on arrival). Licensed auto-checks Verified Execution
 // against each scenario's groundTruthExecution - and, for any scenario that
-// reached Licensed without ever passing through Supervised (a category can
-// jump straight there in one batch of 4+ manual reviews), auto-fetches its
-// response first too, since Licensed automates both axes. All of it runs
+// still needs a response (either never touched, or auto-judged earlier by
+// Supervised while the category was working toward Licensed), auto-fetches
+// it first too, since Licensed automates both axes. All of it runs
 // staggered-parallel at a concurrency of 2 rather than a full simultaneous
 // burst or strict sequential processing. Re-entrant calls for a category
 // already draining are no-ops (guarded by autoDrainRunning) - the active
@@ -829,13 +882,13 @@ function maybeAutoDrain(category){
   if(stage==="supervised"){
     runAutoDrainPool(category, autoResponseCandidates, autoRespond);
   } else if(stage==="licensed"){
-    // Licensed automates both axes. Most items reach Licensed already
-    // carrying a response from their time at Supervised, so they only need
-    // auto-verification - but a category can also jump straight from
-    // Learner to Licensed in a single batch (4+ manual reviews at 90%+
-    // accuracy), leaving some scenarios completely untouched. Those need
-    // the full auto-respond-then-auto-verify chain, not just the second
-    // half of it - see autoRespondThenVerify below.
+    // Licensed automates both axes. A category only ever reaches Licensed
+    // for the first time on the back of a human's own Verified Execution
+    // click (see stageFor/verifiedTrackRecord) - at that moment there can
+    // be a backlog of leftover scenarios in the category: some still
+    // untouched, some auto-judged-but-unverified from an earlier stretch at
+    // Supervised. licensedDrainCandidates picks up both; autoRespondThenVerify
+    // fetches a response first only if one isn't already sitting there.
     runAutoDrainPool(category, licensedDrainCandidates, autoRespondThenVerify);
   }
 }
@@ -881,10 +934,10 @@ async function runAutoDrainPool(category, getBatch, worker){
     }
   } finally {
     autoDrainRunning[category] = false;
-    // The category may have just crossed from Supervised into Licensed
-    // mid-sweep (its last auto-response was also its 4th reviewed decision)
-    // - pick verification up immediately rather than waiting on the next
-    // unrelated state change.
+    // If a manual Verified Execution click (handled outside this pool)
+    // pushed the category into Licensed while this pool was mid-sweep,
+    // pick up verification on whatever it left behind immediately, rather
+    // than waiting on the next unrelated state change.
     if(stageFor(category)==="licensed" && autoVerificationCandidates(category).length){
       maybeAutoDrain(category);
     }
