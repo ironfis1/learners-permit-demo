@@ -34,6 +34,11 @@ jobs:
           CALLS: ${{ inputs.calls_per_session }}
         run: |
           set -u
+          # Normalize: a trailing slash on the input produced "//api/..." and
+          # 404s on every call (run #6), which this job used to report green.
+          BASE_URL="${BASE_URL%/}"
+          echo "Base URL: $BASE_URL"
+          SAW_200=0
           for VISITOR in A B; do
             echo "=== Visitor $VISITOR ==="
             JAR="cookies-$VISITOR.txt"
@@ -48,9 +53,23 @@ jobs:
               REMAIN=$(echo "$STATUS_AND_HEADERS" | grep -i "ratelimit-remaining" | tr -d '\r')
               LIMIT=$(echo "$STATUS_AND_HEADERS" | grep -i "ratelimit-limit:" | tr -d '\r')
               echo "::notice title=Visitor $VISITOR call $i::$STATUS  $LIMIT  $REMAIN"
-              if ! echo "$STATUS" | grep -q "HTTP_STATUS:200"; then
-                BODY=$(cat /tmp/body_${VISITOR}_${i}.json | tr '\n' ' ' | cut -c1-400)
-                echo "::warning title=Visitor $VISITOR call $i NON-200 BODY::$BODY"
-              fi
+              CODE="${STATUS#HTTP_STATUS:}"
+              case "$CODE" in
+                200)
+                  SAW_200=1
+                  ;;
+                429)
+                  echo "::notice title=Visitor $VISITOR call $i::rate limited (expected once the cap engages)"
+                  ;;
+                *)
+                  BODY=$(cat /tmp/body_${VISITOR}_${i}.json 2>/dev/null | tr '\n' ' ' | cut -c1-400)
+                  echo "::error title=Visitor $VISITOR call $i unexpected status::HTTP ${CODE:-none} from POST $BASE_URL/api/recommendation  BODY: $BODY"
+                  exit 1
+                  ;;
+              esac
             done
           done
+          if [ "$SAW_200" -ne 1 ]; then
+            echo "::error title=No successful calls::Zero 200s across both visitors - nothing reached the Anthropic API, so spend/rate-limit behavior was not validated"
+            exit 1
+          fi
