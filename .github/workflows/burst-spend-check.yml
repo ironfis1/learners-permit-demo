@@ -43,15 +43,21 @@ jobs:
             echo "=== Visitor $VISITOR ==="
             JAR="cookies-$VISITOR.txt"
             rm -f "$JAR"
-            curl -sS -c "$JAR" -o /dev/null "$BASE_URL/"
+            # Actions runs bash with -e: keep curl failures (DNS, refused) from
+            # killing the job silently, and report them with the URL instead.
+            LANDING=$(curl -sS -c "$JAR" -o /dev/null -w "%{http_code}" "$BASE_URL/" || true)
+            if [ "$LANDING" != "200" ]; then
+              echo "::error title=Visitor $VISITOR landing page failed::HTTP ${LANDING:-000} from GET $BASE_URL/"
+              exit 1
+            fi
             for i in $(seq 1 "$CALLS"); do
               STATUS_AND_HEADERS=$(curl -sS -b "$JAR" -X POST "$BASE_URL/api/recommendation" \
                 -H "Content-Type: application/json" \
                 -d "{\"id\": $(( (i % 16) + 1 ))}" \
-                -D - -o /tmp/body_${VISITOR}_${i}.json -w "HTTP_STATUS:%{http_code}\n")
-              STATUS=$(echo "$STATUS_AND_HEADERS" | grep -o "HTTP_STATUS:[0-9]*")
-              REMAIN=$(echo "$STATUS_AND_HEADERS" | grep -i "ratelimit-remaining" | tr -d '\r')
-              LIMIT=$(echo "$STATUS_AND_HEADERS" | grep -i "ratelimit-limit:" | tr -d '\r')
+                -D - -o /tmp/body_${VISITOR}_${i}.json -w "HTTP_STATUS:%{http_code}\n" || true)
+              STATUS=$(echo "$STATUS_AND_HEADERS" | grep -o "HTTP_STATUS:[0-9]*" || true)
+              REMAIN=$(echo "$STATUS_AND_HEADERS" | grep -i "ratelimit-remaining" | tr -d '\r' || true)
+              LIMIT=$(echo "$STATUS_AND_HEADERS" | grep -i "ratelimit-limit:" | tr -d '\r' || true)
               echo "::notice title=Visitor $VISITOR call $i::$STATUS  $LIMIT  $REMAIN"
               CODE="${STATUS#HTTP_STATUS:}"
               case "$CODE" in
